@@ -4854,8 +4854,8 @@ _kpi_cards_html = "".join(
             "Approved",
             approved_cases_kpi,
             approved_rate_kpi,
-            total_disbursed,
-            "This Month Disbursed" if selected_month != "All Months" else "Disbursed",
+            approved_attempts_kpi,
+            "Attempts",
             project_value=disbursed_project_value_kpi,
             project_value_label="Project Value",
             project_value_share=approved_value_share_kpi,
@@ -6140,6 +6140,9 @@ with _second_left:
                     text=[str(_v) if _v > 0 else "" for _v in _counts_rp],
                     textposition="inside",
                     insidetextanchor="middle",
+                    textangle=0,
+                    constraintext="none",
+                    cliponaxis=False,
                     textfont=dict(color="#111827", size=10, family="Arial Black"),
                     customdata=np.array(_hover_rp, dtype=object).reshape(-1, 1),
                     hovertemplate="%{customdata[0]}<extra></extra>",
@@ -6168,6 +6171,8 @@ with _second_left:
                 align="left",
             ),
             bargap=0.30,
+            uniformtext_minsize=9,
+            uniformtext_mode="show",
         )
         _rp_fig.update_xaxes(
             title="",
@@ -9931,13 +9936,13 @@ else:
     def _render_table7_click_surface():
         try:
             _t7_component = st.components.v2.component(
-                "rengy_table7_credit_journey_v61",
+                "rengy_table7_credit_journey_v67",
                 html=board_html,
                 js=_t7_click_js,
                 isolate_styles=True,
             )
             _t7_result = _t7_component(
-                key="rengy_table7_credit_journey_v61_instance",
+                key="rengy_table7_credit_journey_v67_instance",
                 on_clicked_change=lambda: None,
             )
             _clicked = clean_text(getattr(_t7_result, "clicked", ""))
@@ -9956,10 +9961,6 @@ else:
 
     _render_table7_click_surface()
 
-    st.caption(
-        "Full horizontal family tree: no lender is hidden, wrapped into another band, or reduced to a tiny chip. "
-        "Every A1–A5 node uses the same readable card and rejected cases continue through their actual next lender."
-    )
 
 
 # ============================================================

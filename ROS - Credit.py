@@ -41,6 +41,7 @@
 import re
 import hashlib
 import html
+import base64
 from urllib.parse import quote
 import time
 import threading
@@ -680,56 +681,105 @@ def normalize_provider(name):
 
 
 # ============================================================
-# 9. CONFIRMED MAIN STATUS MAPPING
+# 9. ROS CURRENT STATUS / LOAN SUB STAGE MAPPING
 # ============================================================
 
-# Only values we have confirmed.
+# Source: ROS Loan Requests frontend mapping (Gh / WI / NS).
+# Keep Current Status and Loan Sub Stage independent, exactly as ROS displays.
+# Unknown future numeric codes are surfaced explicitly instead of being guessed.
 
-CONFIRMED_MAIN_STATUS = {
+ROS_MAIN_STATUS = {
+    0: "Documents Pending",
     1: "Documents Submitted",
+    2: "Approved",
+    3: "Close Lost",
     4: "Login Done",
-    5: "Rejected"
+    5: "Rejected",
+}
+
+ROS_SUB_STATUS = {
+    "Approved": {
+        0: "Full Approved",
+        1: "Partial Approved (<100% LA)",
+        2: "Risk Based Approved (>8.50% ROI)",
+        3: "Disbursed",
+        4: "E-NACH Pending",
+        5: "NACH Done",
+        6: "Co-Applicant Docs Pending",
+        7: "Not Doable",
+    },
+    "Close Lost": {
+        0: "Not Doable",
+    },
+    "Login Done": {
+        0: "Bank Statement Pending",
+        1: "E-NACH Pending",
+        2: "Relook",
+        3: "Not Doable",
+    },
+    "Rejected": {
+        0: "Rejected",
+        1: "Low CIBIL (>650)",
+        2: "High DPD",
+        3: "Overdue (CC/PL/BL/HL/AL/Others)",
+        4: "Written Off (PL/BL/EL/Others)",
+        5: "Written Off (HL/AL/GL/Others)",
+        6: "Co-Applicant Rejected",
+        7: "Relook",
+        8: "Not Doable",
+    },
 }
 
 
-def map_confirmed_main_status(value):
+def _numeric_code(value):
+    """Return an integer ROS code when value is numeric, else None."""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        number = float(value)
+        if number.is_integer():
+            return int(number)
+    except Exception:
+        return None
+    return None
 
+
+def map_confirmed_main_status(value):
+    """Decode loanMainStatus exactly like ROS, with a safe future-code fallback."""
     if value is None:
         return ""
 
-    # ------------------------------------------
-    # Numeric status
-    # ------------------------------------------
-
-    try:
-
-        number = int(
-            float(value)
-        )
-
-        if number in CONFIRMED_MAIN_STATUS:
-            return CONFIRMED_MAIN_STATUS[number]
-
-        # Unknown numeric status.
-        return ""
-
-    except Exception:
-        pass
-
-    # ------------------------------------------
-    # Textual status
-    # ------------------------------------------
+    number = _numeric_code(value)
+    if number is not None:
+        return ROS_MAIN_STATUS.get(number, f"Unknown ROS Status ({number})")
 
     text = clean_text(value)
-
-    if not text:
-        return ""
-
-    # Do not output unknown numeric text.
-    if text.replace(".", "", 1).isdigit():
-        return ""
-
     return text
+
+
+def map_ros_sub_status(main_status_value, sub_status_value):
+    """Decode loanSubStatus using its ROS Current Status context."""
+    if sub_status_value is None or sub_status_value == "":
+        return "-"
+
+    main_status = map_confirmed_main_status(main_status_value)
+    sub_number = _numeric_code(sub_status_value)
+
+    # ROS has no defined sub-status mapping for Documents Pending / Submitted.
+    if sub_number is not None:
+        status_map = ROS_SUB_STATUS.get(main_status)
+        if status_map is None:
+            return "-" if main_status in {"Documents Pending", "Documents Submitted"} else f"Unknown ROS Sub Status ({sub_number})"
+        return status_map.get(sub_number, f"Unknown ROS Sub Status ({sub_number})")
+
+    # Preserve an already-textual API value as-is.
+    text = clean_text(sub_status_value)
+    return text if text else "-"
+
+
+# ============================================================
+
+# Legacy partial status decoder removed: ROS frontend mapping above is authoritative.
 
 
 # ============================================================
@@ -1899,51 +1949,19 @@ def substage_from_event(
     log
 ):
 
-    changed_keys = (
-        audit_changed_keys(log)
-    )
+    changed_keys = audit_changed_keys(log)
+    new_snapshot = audit_new_snapshot(log)
 
-    new_snapshot = (
-        audit_new_snapshot(log)
-    )
+    if "loanSubStatus" not in changed_keys:
+        return ""
 
-    # Explicit textual substatus.
-    if "loanSubStatus" in changed_keys:
+    sub_value = new_snapshot.get("loanSubStatus")
+    main_value = new_snapshot.get("loanMainStatus")
 
-        value = new_snapshot.get(
-            "loanSubStatus"
-        )
-
-        if isinstance(
-            value,
-            str
-        ):
-
-            text = clean_text(
-                value
-            )
-
-            if (
-                text
-                and not text.replace(
-                    ".",
-                    "",
-                    1
-                ).isdigit()
-            ):
-                return text
-
-    description = clean_text(
-        log.get(
-            "description"
-        )
-    ).lower()
-
-    if "disbursed" in description:
-        return "Disbursed"
-
-    if "nach done" in description:
-        return "NACH Done"
+    # Decode numeric audit values using the same status-dependent ROS mapping.
+    mapped = map_ros_sub_status(main_value, sub_value)
+    if mapped and mapped != "-":
+        return mapped
 
     return ""
 
@@ -2471,47 +2489,21 @@ def get_current_substage(
     loan_data
 ):
 
-    root_value = loan_data.get(
-        "loanSubStatus"
-    )
-
-    # Use root only if textual.
-    if isinstance(
-        root_value,
-        str
-    ):
-
-        text = clean_text(
-            root_value
+    # ROS derives Loan Sub Stage from BOTH loanMainStatus and loanSubStatus.
+    # This is the same logic used by the ROS frontend NS(e, t) function.
+    if "loanSubStatus" in loan_data:
+        return map_ros_sub_status(
+            loan_data.get("loanMainStatus"),
+            loan_data.get("loanSubStatus"),
         )
 
-        if (
-            text
-            and not text.replace(
-                ".",
-                "",
-                1
-            ).isdigit()
-        ):
-            return text
-
-    # Explicit textual audit fallback.
-    for log in reversed(
-        sorted_audit_logs(
-            loan_data
-        )
-    ):
-
-        substage = (
-            substage_from_event(
-                log
-            )
-        )
-
+    # Audit fallback only when the root field is genuinely absent.
+    for log in reversed(sorted_audit_logs(loan_data)):
+        substage = substage_from_event(log)
         if substage:
             return substage
 
-    return ""
+    return "-"
 
 
 # ============================================================
@@ -2956,17 +2948,25 @@ def build_report_row(
         )
     )
 
-    current_status = (
-        get_current_status(
-            loan_data
-        )
-    )
+    # ------------------------------------------------------
+    # ROS CURRENT STATUS / LOAN SUB STAGE
+    # ------------------------------------------------------
+    # IMPORTANT: These two display fields come DIRECTLY from the
+    # /loan listing record used by the ROS Loan Status screen.
+    # Do not use /loan/{id} detail values for these columns.
+    #
+    # When the same loan appears in multiple report populations,
+    # prefer the exact Loan Status population row retained during
+    # deduplication. Otherwise use the listing row itself.
+    ros_status_record = list_record.get("_loanStatusRecord")
+    if not isinstance(ros_status_record, dict):
+        ros_status_record = list_record
 
-    loan_sub_stage = (
-        get_current_substage(
-            loan_data
-        )
-    )
+    raw_main_status = ros_status_record.get("loanMainStatus")
+    raw_sub_status = ros_status_record.get("loanSubStatus")
+
+    current_status = map_confirmed_main_status(raw_main_status)
+    loan_sub_stage = map_ros_sub_status(raw_main_status, raw_sub_status)
 
     status_event_date = (
         get_status_event_date(
@@ -3359,7 +3359,7 @@ def _extract_payload_dict(payload):
 
 
 @st.cache_data(ttl=21600, show_spinner=False)
-def _cached_loan_detail(internal_loan_id, extraction_version="disbursed_list_v2"):
+def _cached_loan_detail(internal_loan_id, extraction_version="ros_listing_status_v3"):
     """
     Cache ONE loan detail independently.
 
@@ -3669,7 +3669,7 @@ def build_credit_master_optimized(
 # ============================================================
 
 @st.cache_data(ttl=21600, show_spinner=False)
-def load_credit_data(extraction_version="disbursed_list_v2"):
+def load_credit_data(extraction_version="ros_listing_status_v3"):
     """
     ONE master load for ALL months.
 
@@ -4124,6 +4124,45 @@ st.markdown(
         border-color:#FF5C75;
         box-shadow:0 0 14px rgba(255,48,88,.20),inset 0 1px 0 rgba(255,255,255,.13);
     }
+    /* 5th KPI — Approved split by actual ROS Loan Sub Stage */
+    .ckpi.approved-split {
+        background:linear-gradient(135deg,#075E54,#0B8F78 55%,#075348);
+        border-color:#35E1BE;
+        box-shadow:0 0 14px rgba(27,211,172,.20),inset 0 1px 0 rgba(255,255,255,.13);
+        padding:8px 9px 7px 48px;
+    }
+    .ckpi.approved-split .ckpi-icon {
+        left:8px;
+        width:32px;height:32px;
+    }
+    .ckpi-approved-split-title {
+        position:relative;z-index:2;
+        color:#FFF;font-size:10px;font-weight:950;line-height:1;
+        margin-bottom:5px;white-space:nowrap;
+    }
+    .ckpi-approved-split-grid {
+        position:relative;z-index:2;
+        display:grid;grid-template-columns:1fr 1fr;gap:5px;
+    }
+    .ckpi-approved-split-box {
+        min-width:0;
+        border:1px solid rgba(255,255,255,.22);
+        background:rgba(255,255,255,.09);
+        border-radius:8px;
+        padding:5px 5px 4px;
+    }
+    .ckpi-approved-split-box .slabel {
+        color:rgba(255,255,255,.82);font-size:6.6px;font-weight:900;
+        line-height:1.05;text-transform:uppercase;letter-spacing:.08px;
+        white-space:normal;min-height:14px;
+    }
+    .ckpi-approved-split-box .svalue {
+        color:#FFF;font-size:18px;font-weight:950;line-height:1;margin-top:2px;
+    }
+    .ckpi-approved-split-box .smeta {
+        color:rgba(255,255,255,.86);font-size:7px;font-weight:850;line-height:1.05;
+        margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+    }
     .ckpi.average {
         background:linear-gradient(135deg,#351789,#6933D7 56%,#3B1B89);
         border-color:#8D5AFF;
@@ -4328,7 +4367,7 @@ with refresh_col:
         st.rerun()
 
 with st.spinner("Updating Credit master data..."):
-    df = load_credit_data()
+    df = load_credit_data("ros_listing_status_v3")
 
 if df.empty:
     st.warning("No credit records were returned by the API.")
@@ -4404,85 +4443,100 @@ month_options = ["All Months"] + list(period_label_map.keys())
 
 
 # ============================================================
-# 37. FILTERS — ONE COMPACT ROW
+# 37. FILTERS — ONE COMPACT ROW + MULTI-SELECT FILTERS
 # ============================================================
+# All global controls stay on one visual row. Month mode keeps the cohort
+# behaviour (older logins can disburse in the selected month); Date mode uses
+# the exact selected date range.
 
-f1, f2, f3, f4, f5, f6, f7 = st.columns(
-    [1.08, .92, 1.08, 1.0, 1.0, 1.08, 1.22],
-    gap="small",
+_all_dates = pd.concat(
+    [dash["_login_dt"].dropna(), dash["_disbursed_dt"].dropna()],
+    ignore_index=True,
+)
+_min_date = _all_dates.min().date() if not _all_dates.empty else None
+_max_date = _all_dates.max().date() if not _all_dates.empty else None
+
+_f0, _fperiod, _f1, _f2, _f3, _f4, _f5, _f6 = st.columns(
+    [0.72, 1.42, 1.02, 1.12, 1.02, 1.18, 1.08, 1.15], gap="small"
 )
 
-with f1:
-    selected_month = st.selectbox(
-        "▣  Reporting Month", month_options, index=0, key="credit_top_month"
+with _f0:
+    period_mode = st.selectbox(
+        "Reporting By", ["Month", "Date"], index=0,
+        key="credit_period_mode_v78",
     )
 
-with f2:
-    region_options = ["All Regions"] + sorted([x for x in dash["Region"].unique() if x])
-    selected_region = st.selectbox("⌖  Region", region_options, key="credit_top_region")
-
-with f3:
-    bank_options = ["All Banks / NBFCs"] + sorted([x for x in dash["Bank/NBFC"].unique() if x])
-    selected_bank = st.selectbox(
-        "▤  Bank / NBFC", bank_options, index=0, key="credit_top_bank"
-    )
-
-with f4:
-    status_options = ["All Statuses"] + sorted(
-        [x for x in dash["Current Status"].unique() if x]
-    )
-    selected_status = st.selectbox(
-        "◉  Current Status", status_options, key="credit_top_status"
-    )
-
-with f5:
-    valid_login_dates = dash["_login_dt"].dropna()
-    if valid_login_dates.empty:
-        selected_date = None
-        st.date_input(
-            "◷  Login Date Range", value=None, disabled=True,
-            key="credit_top_login_date_disabled",
-        )
+with _fperiod:
+    if period_mode == "Date":
+        if _min_date is None:
+            selected_date = None
+            st.date_input("Date Range", value=None, disabled=True, key="credit_period_date_disabled_v78")
+        else:
+            selected_date = st.date_input(
+                "Date Range", value=(_min_date, _max_date),
+                min_value=_min_date, max_value=_max_date,
+                help="Exact date range. Login and disbursal dates are evaluated independently.",
+                key="credit_period_date_v78",
+            )
+        selected_months = []
     else:
-        selected_date = st.date_input(
-            "◷  Login Date Range",
-            value=(),
-            min_value=valid_login_dates.min().date(),
-            max_value=valid_login_dates.max().date(),
-            help="Optional · choose start and end dates based on Login Done On",
-            key="credit_top_login_date",
+        selected_months = st.multiselect(
+            "Month(s)", options=list(period_label_map.keys()), default=[],
+            placeholder="All Months",
+            help="Multiple selections allowed. Blank = All Months.",
+            key="credit_top_months_v78",
         )
+        selected_date = None
 
-with f6:
-    consultant_options = ["All Consultants"] + sorted(
-        [x for x in dash["Consultant Name"].unique() if x]
+with _f1:
+    region_options = sorted([x for x in dash["Region"].unique() if x])
+    selected_regions = st.multiselect(
+        "Region", region_options, default=[], placeholder="All Regions",
+        key="credit_top_regions_v78",
     )
-    selected_consultant = st.selectbox(
-        "♙  Consultant", consultant_options, key="credit_top_consultant"
+with _f2:
+    bank_options = sorted([x for x in dash["Bank/NBFC"].unique() if x])
+    selected_banks = st.multiselect(
+        "Bank / NBFC", bank_options, default=[], placeholder="All Banks",
+        key="credit_top_banks_v78",
     )
-
-with f7:
+with _f3:
+    status_options = sorted([x for x in dash["Current Status"].unique() if x])
+    selected_statuses = st.multiselect(
+        "Current Status", status_options, default=[], placeholder="All Statuses",
+        key="credit_top_statuses_v78",
+    )
+with _f4:
+    substage_options = sorted([x for x in dash["Loan Sub Stage"].unique() if x and x != "-"])
+    selected_substages = st.multiselect(
+        "Loan Sub Stage", substage_options, default=[], placeholder="All Sub Stages",
+        key="credit_top_substages_v78",
+    )
+with _f5:
+    consultant_options = sorted([x for x in dash["Consultant Name"].unique() if x])
+    selected_consultants = st.multiselect(
+        "Consultant", consultant_options, default=[], placeholder="All Consultants",
+        key="credit_top_consultants_v78",
+    )
+with _f6:
     search_text = st.text_input(
-        "⌕  Search",
-        placeholder="Lead / Name / CP / Bank",
-        key="credit_top_search",
+        "Search", placeholder="Lead / Name / CP / Bank",
+        key="credit_top_search_v78",
     ).strip()
 
-
 # ============================================================
-# 38. APPLY NON-DATE FILTERS
+# 38. APPLY MULTI-SELECT NON-PERIOD FILTERS
 # ============================================================
-
-# Signature of the active dashboard selection. Table-5 drill-downs are
-# valid only while this exact selection remains active.
 _filter_signature_payload = "|".join(
     [
-        str(selected_month),
-        str(selected_region),
-        str(selected_bank),
-        str(selected_status),
-        str(selected_consultant),
+        str(period_mode),
+        str(sorted(selected_months)),
         str(selected_date if selected_date else ""),
+        str(sorted(selected_regions)),
+        str(sorted(selected_banks)),
+        str(sorted(selected_statuses)),
+        str(sorted(selected_substages)),
+        str(sorted(selected_consultants)),
         str(search_text),
     ]
 )
@@ -4492,123 +4546,94 @@ _dashboard_filter_signature = hashlib.sha1(
 
 filtered = dash.copy()
 
-if selected_region != "All Regions":
-    filtered = filtered[filtered["Region"].eq(selected_region)]
-
-if selected_bank != "All Banks / NBFCs":
-    filtered = filtered[filtered["Bank/NBFC"].eq(selected_bank)]
-
-if selected_status != "All Statuses":
-    filtered = filtered[filtered["Current Status"].eq(selected_status)]
-
-if selected_consultant != "All Consultants":
-    filtered = filtered[filtered["Consultant Name"].eq(selected_consultant)]
-
-# Optional Login Done On date-range filter. No API refetch is required.
-if selected_date:
-    if isinstance(selected_date, (tuple, list)):
-        if len(selected_date) == 2:
-            _login_start, _login_end = selected_date
-        elif len(selected_date) == 1:
-            _login_start = _login_end = selected_date[0]
-        else:
-            _login_start = _login_end = None
-    else:
-        _login_start = _login_end = selected_date
-
-    if _login_start is not None and _login_end is not None:
-        _login_day = filtered["_login_dt"].dt.date
-        filtered = filtered[
-            filtered["_login_dt"].notna()
-            & _login_day.ge(_login_start)
-            & _login_day.le(_login_end)
-        ]
+if selected_regions:
+    filtered = filtered[filtered["Region"].isin(selected_regions)]
+if selected_banks:
+    filtered = filtered[filtered["Bank/NBFC"].isin(selected_banks)]
+if selected_statuses:
+    filtered = filtered[filtered["Current Status"].isin(selected_statuses)]
+if selected_substages:
+    filtered = filtered[filtered["Loan Sub Stage"].isin(selected_substages)]
+if selected_consultants:
+    filtered = filtered[filtered["Consultant Name"].isin(selected_consultants)]
 
 if search_text:
     q = re.escape(search_text)
     search_cols = [
-        "LEAD ID",
-        "Lead Name",
-        "Vendor/Channel Partner Name",
-        "Consultant Name",
-        "Bank/NBFC",
+        "LEAD ID", "Lead Name", "Vendor/Channel Partner Name",
+        "Consultant Name", "Bank/NBFC", "Loan Sub Stage",
     ]
     search_mask = pd.Series(False, index=filtered.index)
     for col in search_cols:
         if col in filtered.columns:
-            search_mask |= (
-                filtered[col]
-                .fillna("")
-                .astype(str)
-                .str.contains(q, case=False, regex=True)
+            search_mask |= filtered[col].fillna("").astype(str).str.contains(
+                q, case=False, regex=True
             )
     filtered = filtered[search_mask]
 
 
 # ============================================================
-# 39. PERIOD FLAGS
+# 39. PERIOD FLAGS — MONTH OR DATE
 # ============================================================
+selected_periods = [period_label_map[x] for x in selected_months if x in period_label_map]
+is_all_periods = period_mode == "Month" and not selected_periods
+report_start = None
+report_end = None
 
-# Initialise first so widget reruns can never reach the KPI section
-# without a valid label.
-report_label = str(selected_month)
+if period_mode == "Date":
+    if isinstance(selected_date, (tuple, list)):
+        if len(selected_date) >= 2:
+            _date_start, _date_end = selected_date[0], selected_date[1]
+        elif len(selected_date) == 1:
+            _date_start = _date_end = selected_date[0]
+        else:
+            _date_start = _date_end = None
+    else:
+        _date_start = _date_end = selected_date
 
-if selected_month == "All Months":
-    report_label = "All Months"
-    login_in_period = filtered["_login_dt"].notna()
-    disbursed_in_period = filtered["_confirmed_disbursed"]
-    report_start = None
-    report_end = None
+    if _date_start is None or _date_end is None:
+        login_in_period = pd.Series(False, index=filtered.index)
+        disbursed_in_period = pd.Series(False, index=filtered.index)
+        report_label = "Date Range"
+    else:
+        report_start = pd.Timestamp(_date_start).normalize()
+        report_end = pd.Timestamp(_date_end).normalize() + pd.Timedelta(days=1) - pd.Timedelta(microseconds=1)
+        login_in_period = filtered["_login_dt"].notna() & filtered["_login_dt"].between(report_start, report_end)
+        disbursed_in_period = filtered["_confirmed_disbursed"] & filtered["_disbursed_dt"].between(report_start, report_end)
+        report_label = f"{report_start:%d %b %Y} – {pd.Timestamp(_date_end):%d %b %Y}"
 else:
-    selected_period = period_label_map[selected_month]
-    report_start = selected_period.to_timestamp()
-    report_end = (report_start + pd.offsets.MonthEnd(1)).normalize()
-
-    login_in_period = (
-        filtered["_login_dt"].notna()
-        & filtered["_login_dt"].dt.to_period("M").eq(selected_period)
-    )
-    disbursed_in_period = (
-        filtered["_confirmed_disbursed"]
-        & filtered["_disbursed_dt"].dt.to_period("M").eq(selected_period)
-    )
+    if is_all_periods:
+        report_label = "All Months"
+        login_in_period = filtered["_login_dt"].notna()
+        disbursed_in_period = filtered["_confirmed_disbursed"]
+    else:
+        _period_set = set(selected_periods)
+        report_start = min(selected_periods).to_timestamp()
+        report_end = (max(selected_periods).to_timestamp() + pd.offsets.MonthEnd(1)).normalize()
+        login_in_period = filtered["_login_dt"].notna() & filtered["_login_dt"].dt.to_period("M").isin(_period_set)
+        disbursed_in_period = filtered["_confirmed_disbursed"] & filtered["_disbursed_dt"].dt.to_period("M").isin(_period_set)
+        report_label = selected_months[0] if len(selected_months) == 1 else f"{len(selected_months)} Months Selected"
 
 period_login_cases = filtered.loc[login_in_period].copy()
 period_disbursed_cases = filtered.loc[disbursed_in_period].copy()
 
-if selected_month == "All Months":
-    same_month_mask = (
-        filtered["_confirmed_disbursed"]
-        & filtered["_login_dt"].notna()
-        & (
-            filtered["_login_dt"].dt.to_period("M")
-            == filtered["_disbursed_dt"].dt.to_period("M")
-        )
-    )
-    older_login_mask = (
-        filtered["_confirmed_disbursed"]
-        & filtered["_login_dt"].notna()
-        & (
-            filtered["_login_dt"].dt.to_period("M")
-            < filtered["_disbursed_dt"].dt.to_period("M")
-        )
-    )
-else:
-    same_month_mask = (
-        disbursed_in_period
-        & filtered["_login_dt"].notna()
-        & filtered["_login_dt"].dt.to_period("M").eq(selected_period)
-    )
-    older_login_mask = (
-        disbursed_in_period
-        & filtered["_login_dt"].notna()
-        & (filtered["_login_dt"] < report_start)
-    )
-
-missing_login_mask = (
-    disbursed_in_period
-    & filtered["_login_dt"].isna()
+# Cohort split is always case-accurate: same-month means the login and
+# disbursal happened in the same calendar month; older-login means the login
+# month is earlier than the disbursal month. This works for Month and Date mode.
+_same_month_relation = (
+    filtered["_login_dt"].notna()
+    & filtered["_disbursed_dt"].notna()
+    & (filtered["_login_dt"].dt.to_period("M") == filtered["_disbursed_dt"].dt.to_period("M"))
 )
+_older_login_relation = (
+    filtered["_login_dt"].notna()
+    & filtered["_disbursed_dt"].notna()
+    & (filtered["_login_dt"].dt.to_period("M") < filtered["_disbursed_dt"].dt.to_period("M"))
+)
+
+same_month_mask = disbursed_in_period & _same_month_relation
+older_login_mask = disbursed_in_period & _older_login_relation
+missing_login_mask = disbursed_in_period & filtered["_login_dt"].isna()
 
 total_logins = int(login_in_period.sum())
 total_disbursed = int(disbursed_in_period.sum())
@@ -4616,20 +4641,91 @@ same_month_disbursed = int(same_month_mask.sum())
 older_login_disbursed = int(older_login_mask.sum())
 missing_login_disbursed = int(missing_login_mask.sum())
 conversion_rate = safe_pct(same_month_disbursed, total_logins)
+raw_month_login_count = total_logins
 
-# Validation: Total Logins is strictly the number of master rows whose
-# parsed "Login Done On" falls in the selected reporting period.
-# No Current Status / Loan Sub Stage condition is applied to this KPI.
-if selected_month != "All Months":
-    raw_month_login_count = int(
-        (
-            dash["_login_dt"].notna()
-            & dash["_login_dt"].dt.to_period("M").eq(selected_period)
-        ).sum()
+
+# ============================================================
+# 39B. GENERIC KPI DRILL-DOWN — SAME DETAIL DEPTH AS TABLE 8
+# ============================================================
+@st.dialog("KPI Case Details", width="large")
+def show_kpi_case_dialog(title, case_frame):
+    if case_frame is None or case_frame.empty:
+        st.info("No underlying cases are available for this KPI.")
+        return
+
+    case_details = case_frame.copy()
+    if "LEAD ID" in case_details.columns:
+        _ids = clean_series(case_details["LEAD ID"])
+        _with_id = case_details.loc[_ids.ne("")].drop_duplicates("LEAD ID", keep="first")
+        _without_id = case_details.loc[_ids.eq("")]
+        case_details = pd.concat([_with_id, _without_id], axis=0).sort_index()
+
+    priority_columns = [
+        "LEAD ID", "Lead Name", "Mobile", "Mobile Number", "mobileNumber",
+        "Region", "Lead District", "Vendor/Channel Partner Name", "Consultant Name",
+        "Bank/NBFC", "Current Status", "Loan Sub Stage", "Requested Date",
+        "Login Done On", "Disbursed At", "Project Value", "Approved Amount",
+        "Disbursed Amount", "Loan Pending Amount", "Credit Officer", "Fintech ID",
+        "Bank Name", "IFSC Code", "Branch", "Comments", "Dynamic Pricing",
+        "Source", "Login Attempts",
+    ]
+    ordered_columns = [c for c in priority_columns if c in case_details.columns]
+    ordered_columns += [c for c in case_details.columns if c not in ordered_columns and not str(c).startswith("_")]
+    case_details = case_details[ordered_columns].copy()
+
+    for col in case_details.columns:
+        if pd.api.types.is_datetime64_any_dtype(case_details[col]):
+            case_details[col] = case_details[col].dt.strftime("%d-%m-%Y %H:%M").fillna("")
+        elif case_details[col].dtype == "object":
+            case_details[col] = case_details[col].apply(
+                lambda v: "" if v is None else (str(v) if isinstance(v, (dict, list, tuple, set)) else v)
+            )
+
+    st.markdown(f"### {html.escape(str(title))}")
+    st.caption(f"{len(case_details):,} underlying cases · use the column filters to drill down")
+    rows_per_page = st.selectbox(
+        "Rows per page", [25, 50, 75, 100], index=1,
+        key=f"kpi_rows_{hashlib.md5(str(title).encode()).hexdigest()[:8]}",
     )
-else:
-    raw_month_login_count = int(dash["_login_dt"].notna().sum())
 
+    gb = GridOptionsBuilder.from_dataframe(case_details)
+    gb.configure_default_column(sortable=True, filter=True, resizable=True, floatingFilter=True, minWidth=125)
+    for col in case_details.columns:
+        if pd.api.types.is_numeric_dtype(case_details[col]):
+            gb.configure_column(col, filter="agNumberColumnFilter")
+        else:
+            gb.configure_column(
+                col, filter="agSetColumnFilter",
+                filterParams={"buttons":["apply","clear"], "closeOnApply":True, "excelMode":"windows", "suppressSelectAll":False, "suppressMiniFilter":False},
+            )
+    gb.configure_pagination(paginationAutoPageSize=False, paginationPageSize=int(rows_per_page))
+    gb.configure_grid_options(
+        suppressRowClickSelection=True, animateRows=False,
+        enableCellTextSelection=True, ensureDomOrder=True,
+        sideBar={"toolPanels":[
+            {"id":"filters","labelDefault":"Filters","labelKey":"filters","iconKey":"filter","toolPanel":"agFiltersToolPanel"},
+            {"id":"columns","labelDefault":"Columns","labelKey":"columns","iconKey":"columns","toolPanel":"agColumnsToolPanel"},
+        ], "defaultToolPanel":""},
+    )
+    grid_response = AgGrid(
+        case_details, gridOptions=gb.build(), update_mode=GridUpdateMode.FILTERING_CHANGED,
+        data_return_mode=DataReturnMode.FILTERED, fit_columns_on_grid_load=False,
+        allow_unsafe_jscode=False, enable_enterprise_modules=True, theme="streamlit",
+        height=560, key=f"kpi_grid_{hashlib.md5(str(title).encode()).hexdigest()[:8]}",
+    )
+    filtered_grid_data = grid_response.get("data", case_details)
+    if filtered_grid_data is None:
+        filtered_grid_data = case_details.copy()
+    if not isinstance(filtered_grid_data, pd.DataFrame):
+        filtered_grid_data = pd.DataFrame(filtered_grid_data)
+    st.markdown(f"**Showing {len(filtered_grid_data):,} of {len(case_details):,} records after filters**")
+    st.download_button(
+        "⬇ Download Filtered Data",
+        data=filtered_grid_data.to_csv(index=False).encode("utf-8-sig"),
+        file_name=f"kpi_{re.sub(r'[^A-Za-z0-9_-]+','_',str(title)).strip('_')}_filtered.csv",
+        mime="text/csv", use_container_width=False,
+        key=f"kpi_dl_{hashlib.md5(str(title).encode()).hexdigest()[:8]}",
+    )
 
 # ============================================================
 # 40. EXECUTIVE KPI STRIP
@@ -4641,7 +4737,18 @@ else:
 
 KPI_ATTEMPT_SUFFIXES = ["1st", "2nd", "3rd", "4th", "5th"]
 
-kpi_cases = period_login_cases.copy()
+# KPI population follows the selected reporting mode.
+# Month: include selected-month logins PLUS confirmed disbursals occurring in
+# the selected month(s), even when those cases were logged in an older month.
+# Date: keep the population tied to Login Done On inside the exact date range.
+if period_mode == "Month":
+    kpi_cases = pd.concat(
+        [period_login_cases, period_disbursed_cases],
+        axis=0,
+    ).copy()
+    kpi_cases = kpi_cases.loc[~kpi_cases.index.duplicated(keep="first")].copy()
+else:
+    kpi_cases = period_login_cases.copy()
 
 # One current case per valid Lead ID. Blank IDs are not collapsed together.
 if "LEAD ID" in kpi_cases.columns:
@@ -4656,10 +4763,30 @@ approved_mask = _kpi_status.eq("approved")
 rejected_mask = _kpi_status.eq("rejected")
 pending_mask = ~(approved_mask | rejected_mask)
 
+# 5th KPI logic — split ONLY the currently Approved ROS population by
+# the exact ROS Loan Sub Stage. "Disbursed" is one bucket; every other
+# Approved sub-stage stays in Approved & Not Disbursed.
+_kpi_substage = clean_series(kpi_cases["Loan Sub Stage"]).str.casefold()
+approved_disbursed_mask = approved_mask & _kpi_substage.eq("disbursed")
+approved_not_disbursed_mask = approved_mask & ~_kpi_substage.eq("disbursed")
+
+# Base KPI counts must be calculated BEFORE the Approved split percentages.
+# The previous version referenced approved_cases_kpi before it existed,
+# which caused the Streamlit NameError.
 total_cases_kpi = int(len(kpi_cases))
 approved_cases_kpi = int(approved_mask.sum())
 pending_cases_kpi = int(pending_mask.sum())
 rejected_cases_kpi = int(rejected_mask.sum())
+
+approved_disbursed_cases_kpi = int(approved_disbursed_mask.sum())
+approved_not_disbursed_cases_kpi = int(approved_not_disbursed_mask.sum())
+
+approved_disbursed_share_kpi = safe_pct(
+    approved_disbursed_cases_kpi, approved_cases_kpi
+)
+approved_not_disbursed_share_kpi = safe_pct(
+    approved_not_disbursed_cases_kpi, approved_cases_kpi
+)
 
 approved_rate_kpi = safe_pct(approved_cases_kpi, total_cases_kpi)
 pending_rate_kpi = safe_pct(pending_cases_kpi, total_cases_kpi)
@@ -4697,6 +4824,12 @@ else:
 
 pending_project_value_kpi = float(_project_value.loc[pending_mask].sum())
 rejected_project_value_kpi = float(_project_value.loc[rejected_mask].sum())
+approved_disbursed_project_value_kpi = float(
+    _project_value.loc[approved_disbursed_mask].sum()
+)
+approved_not_disbursed_project_value_kpi = float(
+    _project_value.loc[approved_not_disbursed_mask].sum()
+)
 
 approved_value_share_kpi = safe_pct(
     approved_project_value_kpi,
@@ -4747,6 +4880,7 @@ avg_attempts_kpi = (
 # Strict reconciliation checks.
 assert approved_cases_kpi + pending_cases_kpi + rejected_cases_kpi == total_cases_kpi
 assert approved_attempts_kpi + pending_attempts_kpi + rejected_attempts_kpi == total_attempts_kpi
+assert approved_disbursed_cases_kpi + approved_not_disbursed_cases_kpi == approved_cases_kpi
 
 
 def _mini_bars():
@@ -4836,71 +4970,206 @@ def _card(
     )
 
 
-_kpi_cards_html = "".join(
-    [
-        _card(
-            "total",
-            "Total Cases",
-            total_cases_kpi,
-            100.0 if total_cases_kpi else 0.0,
-            total_attempts_kpi,
-            "Total Attempts",
-            total_project_value_kpi,
-            "Project Value",
-            100.0 if total_project_value_kpi else 0.0,
-        ),
-        _card(
-            "approved",
-            "Approved",
-            approved_cases_kpi,
-            approved_rate_kpi,
-            approved_attempts_kpi,
-            "Attempts",
-            project_value=disbursed_project_value_kpi,
-            project_value_label="Project Value",
-            project_value_share=approved_value_share_kpi,
-        ),
-        _card(
-            "pending",
-            "Pending",
-            pending_cases_kpi,
-            pending_rate_kpi,
-            pending_attempts_kpi,
-            project_value=pending_project_value_kpi,
-            project_value_label="Project Value",
-            project_value_share=pending_value_share_kpi,
-        ),
-        _card(
-            "rejected",
-            "Rejected",
-            rejected_cases_kpi,
-            rejected_rate_kpi,
-            rejected_attempts_kpi,
-            project_value=rejected_project_value_kpi,
-            project_value_label="Project Value",
-            project_value_share=rejected_value_share_kpi,
-        ),
-        (
-            f'<div class="ckpi average">'
-            f'<div class="ckpi-icon">{KPI_ICONS["average"]}</div>'
-            f'<div class="ckpi-label">Avg. Attempts / Case</div>'
-            f'<div class="ckpi-main"><b>{avg_attempts_kpi:.2f}</b></div>'
-            f'<div class="ckpi-foot">{report_label} - <b>{total_cases_kpi:,} cases</b></div>'
-            f'<div class="ckpi-money">'
-            f'<div class="ckpi-money-label">Project Value</div>'
-            f'<div class="ckpi-money-value">{_format_money_compact(total_project_value_kpi)}</div>'
-            f'</div>'
-            f'</div>'
-        ),
+# Interactive KPI board — premium design from the original dashboard.
+# SVG skin gives us gradients/rounded cards while invisible Plotly markers
+# preserve click-to-drill-down behavior.
+if "kpi_click_nonce_v78" not in st.session_state:
+    st.session_state["kpi_click_nonce_v78"] = 0
+
+
+def _svg_text(value):
+    return html.escape(str(value), quote=True)
+
+
+def _kpi_svg_board():
+    W, H, gap = 1500, 128, 10
+    card_w, card_h, y = (W - gap * 4) / 5, 112, 8
+    defs = """<defs>
+    <linearGradient id="gTotal" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#03417F"/><stop offset=".56" stop-color="#086CC9"/><stop offset="1" stop-color="#063C76"/></linearGradient>
+    <linearGradient id="gApproved" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#007356"/><stop offset=".56" stop-color="#00A878"/><stop offset="1" stop-color="#05664F"/></linearGradient>
+    <linearGradient id="gPending" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#9D5C00"/><stop offset=".56" stop-color="#E79400"/><stop offset="1" stop-color="#9B5700"/></linearGradient>
+    <linearGradient id="gRejected" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#9F1D3D"/><stop offset=".56" stop-color="#E23856"/><stop offset="1" stop-color="#951A38"/></linearGradient>
+    <linearGradient id="gSplit" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#075E54"/><stop offset=".55" stop-color="#0B8F78"/><stop offset="1" stop-color="#075348"/></linearGradient>
+    <filter id="shadow" x="-20%" y="-30%" width="140%" height="170%"><feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#071A2B" flood-opacity=".22"/></filter>
+    <radialGradient id="shine"><stop offset="0" stop-color="#FFFFFF" stop-opacity=".16"/><stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/></radialGradient>
+    </defs>"""
+    parts = [f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}">', defs]
+
+    def icon_svg(kind, cx, cy):
+        if kind == "check":
+            return f'<path d="M {cx-8} {cy} l 6 6 l 12 -14" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>'
+        if kind == "clock":
+            return f'<circle cx="{cx}" cy="{cy}" r="10" fill="none" stroke="#fff" stroke-width="2.5"/><path d="M {cx} {cy-6} v 7 l 5 3" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round"/>'
+        if kind == "x":
+            return f'<path d="M {cx-7} {cy-7} l 14 14 M {cx+7} {cy-7} l -14 14" fill="none" stroke="#fff" stroke-width="2.8" stroke-linecap="round"/>'
+        return f'<path d="M {cx-10} {cy-7} l 10 -5 l 10 5 l -10 5 z M {cx-10} {cy} l 10 5 l 10 -5 M {cx-10} {cy+7} l 10 5 l 10 -5" fill="none" stroke="#fff" stroke-width="2.3" stroke-linejoin="round"/>'
+
+    cards = [
+        ("Total Cases", total_cases_kpi, 100.0 if total_cases_kpi else 0.0, total_project_value_kpi, total_attempts_kpi, "Total Attempts", "gTotal", "#12B9FF", "layers"),
+        ("Approved", approved_cases_kpi, approved_rate_kpi, disbursed_project_value_kpi, approved_attempts_kpi, "Attempts", "gApproved", "#20EAB2", "check"),
+        ("Pending", pending_cases_kpi, pending_rate_kpi, pending_project_value_kpi, pending_attempts_kpi, "Attempts", "gPending", "#FFC11B", "clock"),
+        ("Rejected", rejected_cases_kpi, rejected_rate_kpi, rejected_project_value_kpi, rejected_attempts_kpi, "Attempts", "gRejected", "#FF5C75", "x"),
     ]
-)
+    for i, (label, count, pct, pvalue, attempts, foot, grad, border, icon) in enumerate(cards):
+        x = i * (card_w + gap)
+        count_s = f"{count:,}"
+        parts += [
+            f'<g filter="url(#shadow)"><rect x="{x:.1f}" y="{y}" width="{card_w:.1f}" height="{card_h}" rx="14" fill="url(#{grad})" stroke="{border}" stroke-width="1.2"/>',
+            f'<ellipse cx="{x+58:.1f}" cy="{y+58}" rx="64" ry="56" fill="url(#shine)"/>',
+            f'<circle cx="{x+37:.1f}" cy="{y+58}" r="20" fill="#fff" fill-opacity=".11" stroke="#fff" stroke-opacity=".34"/>',
+            icon_svg(icon, x+37, y+58),
+            f'<text x="{x+68:.1f}" y="{y+28}" fill="#fff" font-size="12" font-weight="800" font-family="Arial">{_svg_text(label)}</text>',
+            f'<text x="{x+68:.1f}" y="{y+58}" fill="#fff" font-size="27" font-weight="900" font-family="Arial">{count_s}</text>',
+            f'<text x="{x+68+len(count_s)*16:.1f}" y="{y+57}" fill="#fff" font-size="10" font-weight="800" font-family="Arial">({pct:.1f}%)</text>',
+            f'<text x="{x+68:.1f}" y="{y+88}" fill="#fff" fill-opacity=".90" font-size="9" font-weight="700" font-family="Arial">{_svg_text(foot)} - <tspan font-size="10" font-weight="900">{attempts:,}</tspan></text>',
+            f'<text x="{x+card_w-12:.1f}" y="{y+22}" text-anchor="end" fill="#fff" fill-opacity=".78" font-size="7" font-weight="800" font-family="Arial">PROJECT VALUE</text>',
+            f'<text x="{x+card_w-12:.1f}" y="{y+40}" text-anchor="end" fill="#fff" font-size="14" font-weight="900" font-family="Arial">{_svg_text(_format_money_compact(pvalue))}</text></g>'
+        ]
 
-# One uninterrupted HTML block: no Markdown-indented fragments.
-st.markdown(
-    '<div class="credit-kpis">' + _kpi_cards_html + '</div>',
-    unsafe_allow_html=True,
-)
+    x = 4 * (card_w + gap)
+    parts += [
+        f'<g filter="url(#shadow)"><rect x="{x:.1f}" y="{y}" width="{card_w:.1f}" height="{card_h}" rx="14" fill="url(#gSplit)" stroke="#35E1BE" stroke-width="1.2"/>',
+        f'<circle cx="{x+31:.1f}" cy="{y+28}" r="16" fill="#fff" fill-opacity=".11" stroke="#fff" stroke-opacity=".30"/>',
+        icon_svg("check", x+31, y+28),
+        f'<text x="{x+55:.1f}" y="{y+31}" fill="#fff" font-size="11" font-weight="900" font-family="Arial">Approved — Disbursal Split</text>'
+    ]
+    box_gap, inner_x, inner_y = 7, x + 10, y + 50
+    inner_w = (card_w - 20 - box_gap) / 2
+    split_rows = [
+        ("APPROVED & DISBURSED", approved_disbursed_cases_kpi, approved_disbursed_share_kpi, approved_disbursed_project_value_kpi),
+        ("APPROVED & NOT DISBURSED", approved_not_disbursed_cases_kpi, approved_not_disbursed_share_kpi, approved_not_disbursed_project_value_kpi),
+    ]
+    for j, (label, count, share, value) in enumerate(split_rows):
+        bx = inner_x + j * (inner_w + box_gap)
+        parts += [
+            f'<rect x="{bx:.1f}" y="{inner_y}" width="{inner_w:.1f}" height="52" rx="8" fill="#fff" fill-opacity=".09" stroke="#fff" stroke-opacity=".25"/>',
+            f'<text x="{bx+7:.1f}" y="{inner_y+13}" fill="#fff" fill-opacity=".84" font-size="6.4" font-weight="800" font-family="Arial">{label}</text>',
+            f'<text x="{bx+7:.1f}" y="{inner_y+34}" fill="#fff" font-size="20" font-weight="900" font-family="Arial">{count:,}</text>',
+            f'<text x="{bx+7:.1f}" y="{inner_y+46}" fill="#fff" fill-opacity=".90" font-size="7.5" font-weight="700" font-family="Arial">{share:.1f}% · {_svg_text(_format_money_compact(value))}</text>'
+        ]
+    parts.append('</g></svg>')
+    return ''.join(parts)
 
+
+_kpi_svg_uri = "data:image/svg+xml;base64," + base64.b64encode(_kpi_svg_board().encode("utf-8")).decode("ascii")
+_kpi_fig = go.Figure()
+_kpi_fig.add_layout_image(dict(source=_kpi_svg_uri, xref="x", yref="y", x=0, y=1, sizex=5, sizey=1, sizing="stretch", opacity=1, layer="below"))
+_kpi_x = [0.5, 1.5, 2.5, 3.5, 4.27, 4.73]
+_kpi_custom = [["total"], ["approved"], ["pending"], ["rejected"], ["disbursed"], ["not_disbursed"]]
+_kpi_hover = [
+    f"<b>Total Cases</b><br>Cases: {total_cases_kpi:,}<br>Project Value: {_format_money_compact(total_project_value_kpi)}<br>Total Attempts: {total_attempts_kpi:,}<extra></extra>",
+    f"<b>Approved</b><br>Cases: {approved_cases_kpi:,}<br>Share: {approved_rate_kpi:.1f}%<br>Project Value: {_format_money_compact(disbursed_project_value_kpi)}<br>Attempts: {approved_attempts_kpi:,}<extra></extra>",
+    f"<b>Pending</b><br>Cases: {pending_cases_kpi:,}<br>Share: {pending_rate_kpi:.1f}%<br>Project Value: {_format_money_compact(pending_project_value_kpi)}<br>Attempts: {pending_attempts_kpi:,}<extra></extra>",
+    f"<b>Rejected</b><br>Cases: {rejected_cases_kpi:,}<br>Share: {rejected_rate_kpi:.1f}%<br>Project Value: {_format_money_compact(rejected_project_value_kpi)}<br>Attempts: {rejected_attempts_kpi:,}<extra></extra>",
+    f"<b>Approved & Disbursed</b><br>Cases: {approved_disbursed_cases_kpi:,}<br>Share of Approved: {approved_disbursed_share_kpi:.1f}%<br>Project Value: {_format_money_compact(approved_disbursed_project_value_kpi)}<extra></extra>",
+    f"<b>Approved & Not Disbursed</b><br>Cases: {approved_not_disbursed_cases_kpi:,}<br>Share of Approved: {approved_not_disbursed_share_kpi:.1f}%<br>Project Value: {_format_money_compact(approved_not_disbursed_project_value_kpi)}<extra></extra>",
+]
+_kpi_fig.add_trace(go.Scatter(x=_kpi_x, y=[0.5]*6, mode="markers", customdata=_kpi_custom, marker=dict(size=[150,150,150,150,90,90], opacity=0.001), hovertemplate=_kpi_hover, showlegend=False))
+_kpi_fig.update_layout(height=142, margin=dict(l=0,r=0,t=2,b=2), xaxis=dict(range=[0,5],visible=False,fixedrange=True), yaxis=dict(range=[0,1],visible=False,fixedrange=True), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", hoverlabel=dict(bgcolor="white",font_color="#0F172A",font_size=11), dragmode=False)
+_kpi_event = st.plotly_chart(_kpi_fig, use_container_width=True, on_select="rerun", selection_mode="points", config={"displayModeBar":False,"displaylogo":False,"scrollZoom":False}, key=f"executive_kpi_board_v710_{_dashboard_filter_signature}_{st.session_state['kpi_click_nonce_v78']}")
+_kpi_points = []
+try:
+    _kpi_points = list(_kpi_event.selection.points)
+except Exception:
+    try:
+        _kpi_points = list(_kpi_event.get("selection", {}).get("points", []))
+    except Exception:
+        _kpi_points = []
+if _kpi_points:
+    _p = _kpi_points[0]
+    _cd = _p.get("customdata") if isinstance(_p, dict) else None
+    _target = _cd[0] if isinstance(_cd, (list, tuple)) and _cd else None
+    st.session_state["kpi_click_nonce_v78"] += 1
+    _detail_map = {
+        "total": ("Total Cases", kpi_cases),
+        "approved": ("Approved Cases", kpi_cases.loc[approved_mask]),
+        "pending": ("Pending Cases", kpi_cases.loc[pending_mask]),
+        "rejected": ("Rejected Cases", kpi_cases.loc[rejected_mask]),
+        "disbursed": ("Approved & Disbursed", kpi_cases.loc[approved_disbursed_mask]),
+        "not_disbursed": ("Approved & Not Disbursed", kpi_cases.loc[approved_not_disbursed_mask]),
+    }
+    if _target in _detail_map:
+        _ttl, _frm = _detail_map[_target]
+        show_kpi_case_dialog(_ttl, _frm)
+
+# ============================================================
+# 40B. LOAN SUB-STAGE SNAPSHOT — COMPACT INTERACTIVE BAR
+# ============================================================
+# Hover = basic details. Click a bar = same case-level drill-down used by KPI/Table 8.
+st.markdown("### Loan Sub-Stage Snapshot")
+_substage_series = clean_series(kpi_cases["Loan Sub Stage"]).replace({"":"No Sub Status", "-":"No Sub Status"})
+_substage_summary = (
+    pd.DataFrame({"Loan Sub Stage": _substage_series})
+    .assign(
+        Project_Value=pd.to_numeric(kpi_cases.get("Project Value", 0), errors="coerce").fillna(0).values
+        if len(kpi_cases) else []
+    )
+    .groupby("Loan Sub Stage", dropna=False)
+    .agg(Cases=("Loan Sub Stage", "size"), Project_Value=("Project_Value", "sum"))
+    .reset_index()
+    .sort_values(["Cases", "Project_Value"], ascending=[True, True])
+)
+_substage_summary["Share"] = _substage_summary["Cases"].apply(lambda x: safe_pct(x, total_cases_kpi))
+
+if "substage_click_nonce_v78" not in st.session_state:
+    st.session_state["substage_click_nonce_v78"] = 0
+
+if _substage_summary.empty:
+    st.info("No loan sub-stage data for the current filters.")
+else:
+    _sub_fig = go.Figure(go.Bar(
+        x=_substage_summary["Cases"],
+        y=_substage_summary["Loan Sub Stage"],
+        orientation="h",
+        customdata=np.column_stack([
+            _substage_summary["Loan Sub Stage"],
+            _substage_summary["Share"],
+            _substage_summary["Project_Value"],
+        ]),
+        text=_substage_summary["Cases"].map(lambda x: f"{int(x):,}"),
+        textposition="outside",
+        cliponaxis=False,
+        hovertemplate=(
+            "<b>%{customdata[0]}</b><br>"
+            "Cases: <b>%{x:,.0f}</b><br>"
+            "Share of filtered cases: <b>%{customdata[1]:.1f}%</b><br>"
+            "Project Value: <b>₹%{customdata[2]:,.0f}</b>"
+            "<extra></extra>"
+        ),
+        marker=dict(line=dict(width=0)),
+    ))
+    _sub_height = max(235, min(430, 72 + len(_substage_summary) * 27))
+    _sub_fig.update_layout(
+        height=_sub_height,
+        margin=dict(l=6, r=42, t=5, b=22),
+        xaxis=dict(title=None, showgrid=True, gridcolor="rgba(148,163,184,.18)",
+                   zeroline=False, fixedrange=True, tickfont=dict(size=9)),
+        yaxis=dict(title=None, fixedrange=True, tickfont=dict(size=10, color="#0F172A"),
+                   automargin=True),
+        paper_bgcolor="white", plot_bgcolor="white",
+        bargap=0.28,
+        hoverlabel=dict(bgcolor="white", font_color="#0F172A", font_size=11, align="left"),
+        dragmode=False,
+    )
+    _sub_event = st.plotly_chart(
+        _sub_fig, use_container_width=True, on_select="rerun", selection_mode="points",
+        config={"displayModeBar": False, "displaylogo": False, "scrollZoom": False},
+        key=f"substage_snapshot_v78_{_dashboard_filter_signature}_{st.session_state['substage_click_nonce_v78']}",
+    )
+    _sub_points = []
+    try:
+        _sub_points = list(_sub_event.selection.points)
+    except Exception:
+        try: _sub_points = list(_sub_event.get("selection", {}).get("points", []))
+        except Exception: _sub_points = []
+    if _sub_points:
+        _sp = _sub_points[0]
+        _scd = _sp.get("customdata") if isinstance(_sp, dict) else None
+        _clicked_sub = clean_text(_scd[0]) if isinstance(_scd, (list, tuple)) and _scd else ""
+        if _clicked_sub:
+            st.session_state["substage_click_nonce_v78"] += 1
+            _sub_mask = _substage_series.eq(_clicked_sub)
+            show_kpi_case_dialog(f"Loan Sub Stage — {_clicked_sub}", kpi_cases.loc[_sub_mask])
 
 # ============================================================
 # 41–43. EXECUTIVE ANALYSIS ROW
@@ -4934,7 +5203,7 @@ with analysis_1_col:
     if _day_source.empty:
         st.info("No login records for the selected filters.")
 
-    elif selected_month == "All Months":
+    elif is_all_periods:
         _day_source["_PlotPeriod"] = _day_source["_login_dt"].dt.to_period("M")
         _day_source["_PlotLabel"] = _day_source["_login_dt"].dt.strftime("%b %Y")
         _period_order = sorted(
@@ -5354,7 +5623,7 @@ with analysis_3_col:
     st.markdown("### 3. Disbursed Cohort")
     st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
 
-    if selected_month == "All Months":
+    if is_all_periods:
         _cohort_source = filtered.loc[
             filtered["_confirmed_disbursed"]
             & filtered["_disbursed_dt"].notna()
@@ -6204,18 +6473,7 @@ with _second_right:
     st.markdown("### 5. Lender Disbursement Performance")
     st.markdown("<div style='height:24px'></div>", unsafe_allow_html=True)
 
-    _bank_disb = filtered.loc[
-        filtered["_confirmed_disbursed"]
-    ].copy()
-
-    if selected_month != "All Months":
-        _bank_disb = _bank_disb.loc[
-            _bank_disb["_disbursed_dt"].between(
-                report_start,
-                report_end,
-                inclusive="both",
-            )
-        ].copy()
+    _bank_disb = filtered.loc[disbursed_in_period].copy()
 
     if _bank_disb.empty:
         st.info("No confirmed disbursals for the selected filters.")

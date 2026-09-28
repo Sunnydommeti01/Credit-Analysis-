@@ -8566,34 +8566,433 @@ div[data-testid="stHorizontalBlock"]:has(#table5-clean-header) > div {
 st.markdown('<div id="table7"></div>', unsafe_allow_html=True)
 st.markdown("### 9. Credit Journey — Lender Recovery Path (A1 → A5)")
 
-# STREAM 6.8 — SIMPLE, NON-INTERACTIVE CREDIT JOURNEY
-# No popup/query-param/component click logic is used in this section.
-# The chart is intentionally visual-only so it cannot interfere with any
-# interaction elsewhere in the dashboard.
+T7_REMARK_MAP = {'1 + dpds in two wheeler loan': ('High DPD', 'Credit Profile'),
+ '1+ dpd with overdue due amount greater than norms| auto rejection! dpd > 30': ('Multiple Credit Issues',
+                                                                                 'Credit Profile'),
+ '1+ dpd with overdue due amount greater than norms| auto rejection! internal credit score lower than prescribed level': ('Multiple '
+                                                                                                                          'Credit '
+                                                                                                                          'Issues',
+                                                                                                                          'Credit '
+                                                                                                                          'Profile'),
+ '1+ dpd with overdue due amount greater than norms| auto rejection! internal credit score lower than prescribed level, i don’t get salary in a bank account| rejected at app_susp_to_rejection': ('Bank '
+                                                                                                                                                                                                   'Issue',
+                                                                                                                                                                                                   'Banking'),
+ '1+ dpds in gold loan': ('High DPD', 'Credit Profile'),
+ '1+ dpds in hl': ('High DPD', 'Credit Profile'),
+ '1+ dpds in mudra loan': ('High DPD', 'Credit Profile'),
+ '1+ dpds in pl': ('High DPD', 'Credit Profile'),
+ '1+ dpds in two wheeler loan': ('High DPD', 'Credit Profile'),
+ '120+ dpds in gold loan': ('High DPD', 'Credit Profile'),
+ '180+ dpds': ('High DPD', 'Credit Profile'),
+ '180+ dpds in kisan credit card': ('High DPD', 'Credit Profile'),
+ '30+ dpds in consumer loan': ('High DPD', 'Credit Profile'),
+ '30+ dpds in credit card': ('High DPD', 'Credit Profile'),
+ '30+ dpds in housing loan': ('High DPD', 'Credit Profile'),
+ '30+ dpds in pl': ('High DPD', 'Credit Profile'),
+ '470 credit card overdue': ('WOF/Default', 'Credit Profile'),
+ '497 cibil & 180+dpds in business loan': ('Multiple Credit Issues', 'Credit Profile'),
+ '534 cibil multiple dpds in gl , pl and etc': ('Multiple Credit Issues', 'Credit Profile'),
+ '537 cibil 700 dpds in pl': ('Multiple Credit Issues', 'Credit Profile'),
+ '540+ dpds in kisan credit card cibil 760': ('Multiple Credit Issues', 'Credit Profile'),
+ '555 cibil & wof': ('Multiple Credit Issues', 'Credit Profile'),
+ '60% approval moved to solfin': ('Moved Solfin', 'Lender Movement'),
+ '60% approved': ('Partial Approval', 'Approval'),
+ '60+ dpds': ('High DPD', 'Credit Profile'),
+ '60+ dpds in 2 wheeler loan': ('High DPD', 'Credit Profile'),
+ '60+ dpds in bl': ('High DPD', 'Credit Profile'),
+ '60+ dpds in credit card': ('High DPD', 'Credit Profile'),
+ '60+ dpds in gold loan': ('High DPD', 'Credit Profile'),
+ '60+ dpds in kissan credit card': ('High DPD', 'Credit Profile'),
+ '614 cibil & written off in personal loan': ('Multiple Credit Issues', 'Credit Profile'),
+ '659 cibil and 60+ dpds in pl': ('Multiple Credit Issues', 'Credit Profile'),
+ '670 cibil,overdue in active loan continuous dpd,cannot do': ('Multiple Credit Issues', 'Credit Profile'),
+ '673 cibil , 60+ dpds in housing loan': ('Multiple Credit Issues', 'Credit Profile'),
+ '720+ dpds': ('High DPD', 'Credit Profile'),
+ '740 cibil recent cheque bounces': ('Low CIBIL', 'Credit Profile'),
+ '90+ dpds': ('High DPD', 'Credit Profile'),
+ '900+ dpds in two wheeler loan': ('High DPD', 'Credit Profile'),
+ 'abb is low': ('Low ABB', 'Credit Profile'),
+ 'abb low': ('Low ABB', 'Credit Profile'),
+ 'age is 60+': ('Age Issue', 'Policy'),
+ 'all nbfcs rejected': ('Credit Reject', 'Credit Decision'),
+ 'already applied before| dedupe rule rejection': ('Duplicate', 'Lead Quality'),
+ 'applicant cibil 490': ('Low CIBIL', 'Credit Profile'),
+ 'as per sales team confirmation project cancelled': ('Project Cancelled', 'Customer/Project'),
+ 'asking noc of existing loan in bank & moved to ecofy': ('Moved Ecofy', 'Lender Movement'),
+ 'auto rejection! minimum age norms not met': ('Age Issue', 'Policy'),
+ 'bank details not given and sales team not confrimed': ('Sales Pending', 'Internal'),
+ 'bank statement pending': ('Docs Pending', 'Documentation'),
+ 'bank statement uploaded, abb is low': ('Docs Pending', 'Documentation'),
+ 'bill commercial customer intrestred nps only after bill updation will do login': ('Moved NPS',
+                                                                                    'Lender Movement'),
+ 'bureau score less than policy criteria| auto rejection - low bureau score': ('Low CIBIL', 'Credit Profile'),
+ 'bureau score less than policy criteria| auto rejection! internal credit score lower than prescribed level': ('Low '
+                                                                                                               'CIBIL',
+                                                                                                               'Credit '
+                                                                                                               'Profile'),
+ 'case approved in solfin for ₹2,10,000, customer requires ₹1,500–₹2,000 emi case moved to nps as per vendor & sales team.': ('Moved '
+                                                                                                                              'Solfin',
+                                                                                                                              'Lender '
+                                                                                                                              'Movement'),
+ 'case due to low cibil and dpd and overdue amount 36,435': ('Multiple Credit Issues', 'Credit Profile'),
+ 'case is approved in credit fair but with increased 1% of roi & customer is denied. case is moved to ecofy': ('Moved '
+                                                                                                               'Ecofy',
+                                                                                                               'Lender '
+                                                                                                               'Movement'),
+ 'case is rejected due to low cibil score and settlement in credit card and overdue in credit cards': ('WOF/Default',
+                                                                                                       'Credit '
+                                                                                                       'Profile'),
+ 'case suspended due to aqb is lower than the internal limit': ('Low ABB', 'Credit Profile'),
+ 'cibil 314': ('Low CIBIL', 'Credit Profile'),
+ 'cibil 320': ('Low CIBIL', 'Credit Profile'),
+ 'cibil 400': ('Low CIBIL', 'Credit Profile'),
+ 'cibil 415': ('Low CIBIL', 'Credit Profile'),
+ 'cibil 437': ('Low CIBIL', 'Credit Profile'),
+ 'cibil 439': ('Low CIBIL', 'Credit Profile'),
+ 'cibil 444': ('Low CIBIL', 'Credit Profile'),
+ 'cibil 458 60+ dpds in mudra loan': ('Multiple Credit Issues', 'Credit Profile'),
+ 'cibil 468': ('Low CIBIL', 'Credit Profile'),
+ 'cibil 471': ('Low CIBIL', 'Credit Profile'),
+ 'cibil 472 720+dpds in consumer loan': ('Multiple Credit Issues', 'Credit Profile'),
+ 'cibil 483': ('Low CIBIL', 'Credit Profile'),
+ 'cibil 486': ('Low CIBIL', 'Credit Profile'),
+ 'cibil 487': ('Low CIBIL', 'Credit Profile'),
+ 'cibil 500': ('Low CIBIL', 'Credit Profile'),
+ 'cibil 503 dpds in kissan credit card': ('Multiple Credit Issues', 'Credit Profile'),
+ 'cibil 508 co applicant tractor loan suit file case not doable in credit fair': ('Multiple Credit Issues',
+                                                                                  'Credit Profile'),
+ 'cibil 513': ('Low CIBIL', 'Credit Profile'),
+ 'cibil 514': ('Low CIBIL', 'Credit Profile'),
+ 'cibil 520': ('Low CIBIL', 'Credit Profile'),
+ 'cibil 566 720+ dpds in auto loan (personal)': ('Multiple Credit Issues', 'Credit Profile'),
+ 'cibil 603': ('Low CIBIL', 'Credit Profile'),
+ 'cibil 638 wof in auto loan': ('Multiple Credit Issues', 'Credit Profile'),
+ 'cibil 653': ('Low CIBIL', 'Credit Profile'),
+ 'cibil 655 , spm in kisan credit card.': ('Low CIBIL', 'Credit Profile'),
+ 'cibil 666 recent dpds overdues not doable': ('Multiple Credit Issues', 'Credit Profile'),
+ 'cibil 673 -kcc , housing loan emi overdue , multiple ecs bounce charges detected in banking , not doable': ('ROI/EMI '
+                                                                                                              'Issue',
+                                                                                                              'Customer/Project'),
+ 'cibil 691 60+ dpds in hl': ('Multiple Credit Issues', 'Credit Profile'),
+ 'cibil 693 - 120+dpds in used car loan': ('Multiple Credit Issues', 'Credit Profile'),
+ 'cibil 718 & need bank statement to proceed': ('Docs Pending', 'Documentation'),
+ 'cibil 722 30+ dpds in vechile loan': ('Multiple Credit Issues', 'Credit Profile'),
+ 'cibil 750 , wof in pl': ('Multiple Credit Issues', 'Credit Profile'),
+ 'cibil 756 dpds in od account moved to fibe': ('Moved FIBE', 'Lender Movement'),
+ 'cibil 758 30+ dpds auto loan (personal)': ('Multiple Credit Issues', 'Credit Profile'),
+ 'cibil 772 60+ dpds in hl': ('Multiple Credit Issues', 'Credit Profile'),
+ 'cibil 781 and wof in personal loan': ('Multiple Credit Issues', 'Credit Profile'),
+ 'cibil 795 90+ dpds \\:two-wheeler loan': ('Multiple Credit Issues', 'Credit Profile'),
+ 'cibil below 650': ('Low CIBIL', 'Credit Profile'),
+ 'co app cibil 560': ('Low CIBIL', 'Credit Profile'),
+ 'co app dual pan': ('KYC/Mismatch', 'Documentation'),
+ 'co applicant cibil is low': ('Low CIBIL', 'Credit Profile'),
+ 'co- applicant cibil': ('Low CIBIL', 'Credit Profile'),
+ 'commercial': ('Commercial/Policy', 'Policy'),
+ 'commercial case': ('Commercial/Policy', 'Policy'),
+ 'commercial case moved to solfin': ('Moved Solfin', 'Lender Movement'),
+ 'confirmation pending from sales': ('Sales Pending', 'Internal'),
+ 'continuous dpd and overdue in active loans not doable,cibil low': ('Multiple Credit Issues',
+                                                                     'Credit Profile'),
+ 'converted to cash': ('Cash', 'Payment/Conversion'),
+ 'credit card settelment': ('WOF/Default', 'Credit Profile'),
+ 'customer aadhar linked mobile number is not working, need to change mobile number. it will be hold till it done': ('Hold',
+                                                                                                                     'Pending/Hold'),
+ 'customer address is not updated in electric bill': ('KYC/Mismatch', 'Documentation'),
+ 'customer already login with another vendor': ('Other Vendor', 'Lead Quality'),
+ 'customer bill address is not updated in discom': ('KYC/Mismatch', 'Documentation'),
+ 'customer bill address not updated in bill and pm surya ghar portal also customer need to updated in discom': ('KYC/Mismatch',
+                                                                                                                'Documentation'),
+ 'customer call not responding past two days': ('Cust. NR', 'Customer/Project'),
+ 'customer confirmation pending': ('Cust. Pending', 'Customer/Project'),
+ 'customer converted ecofy': ('Moved Ecofy', 'Lender Movement'),
+ 'customer converted to cash': ('Cash', 'Payment/Conversion'),
+ 'customer converted to cash payment': ('Cash', 'Payment/Conversion'),
+ 'customer converted to ecofy': ('Moved Ecofy', 'Lender Movement'),
+ 'customer converted to solfin': ('Moved Solfin', 'Lender Movement'),
+ 'customer convertred to ecofy': ('Moved Ecofy', 'Lender Movement'),
+ 'customer does not have bank offer in his existing bank. need another bank account to proceed & informed to sales person': ('Bank '
+                                                                                                                             'Issue',
+                                                                                                                             'Banking'),
+ 'customer does not have loan offer in existing bank account. need another bank account to proceed': ('Bank '
+                                                                                                      'Issue',
+                                                                                                      'Banking'),
+ 'customer does not have loan offer in his existing bank.': ('Bank Issue', 'Banking'),
+ 'customer interested in fibe loan': ('Moved FIBE', 'Lender Movement'),
+ 'customer is not available as he went to vacation to other country': ('Cust. Unavailable',
+                                                                       'Customer/Project'),
+ 'customer kyc surname and bill surname mismatched waiting for vendor conformation': ('KYC/Mismatch',
+                                                                                      'Documentation'),
+ 'customer moved to fibe': ('Moved FIBE', 'Lender Movement'),
+ 'customer moved to nps': ('Moved NPS', 'Lender Movement'),
+ 'customer name is different in bank passbook & in other documents. name has to be correct in passbook': ('KYC/Mismatch',
+                                                                                                          'Documentation'),
+ 'customer name mismatch in bank passbook & electricity bill. need to change': ('KYC/Mismatch',
+                                                                                'Documentation'),
+ 'customer need time': ('Cust. Pending', 'Customer/Project'),
+ 'customer need to update address in ebill at discomm': ('KYC/Mismatch', 'Documentation'),
+ 'customer not answering': ('Cust. NR', 'Customer/Project'),
+ 'customer not answering call, confirmed by sales team.': ('Cust. NR', 'Customer/Project'),
+ 'customer not at confirmed to proceed with further': ('Cust. Pending', 'Customer/Project'),
+ 'customer not giving additional docs': ('Docs Pending', 'Documentation'),
+ 'customer not giving confirmation for login': ('Login/Processing', 'Processing'),
+ 'customer not interested': ('Not Interested', 'Customer/Project'),
+ 'customer not interested for multiple logins': ('Not Interested', 'Customer/Project'),
+ 'customer not responding': ('Cust. NR', 'Customer/Project'),
+ 'customer not supporting': ('Cust. Pending', 'Customer/Project'),
+ 'customer not supporting for login': ('Cust. Pending', 'Customer/Project'),
+ 'customer said wait for some time': ('Cust. Pending', 'Customer/Project'),
+ 'customer shifted solfin': ('Moved Solfin', 'Lender Movement'),
+ 'customer unable to provide statement': ('Docs Pending', 'Documentation'),
+ 'customer wants to nps': ('Moved NPS', 'Lender Movement'),
+ 'customer wants to proceed with nps.': ('Moved NPS', 'Lender Movement'),
+ 'customer wants to shift to nbfc': ('Moved NBFC', 'Lender Movement'),
+ 'cx confirmation pending': ('Cust. Pending', 'Customer/Project'),
+ 'cx not interested': ('Not Interested', 'Customer/Project'),
+ 'didnt get any confirmation from sales team': ('Sales Pending', 'Internal'),
+ 'didnt show bank offer to customer. so, moved to ecofy': ('Moved Ecofy', 'Lender Movement'),
+ 'disbursed in nps': ('Moved NPS', 'Lender Movement'),
+ 'dpds': ('High DPD', 'Credit Profile'),
+ 'dpds in bl': ('High DPD', 'Credit Profile'),
+ 'dpds in business loan': ('High DPD', 'Credit Profile'),
+ 'dpds in consumer loan': ('High DPD', 'Credit Profile'),
+ 'dpds in credit card': ('High DPD', 'Credit Profile'),
+ 'dpds in gold loan': ('High DPD', 'Credit Profile'),
+ 'dpds in kissan credit card': ('High DPD', 'Credit Profile'),
+ 'dpds in mudra loan': ('High DPD', 'Credit Profile'),
+ 'due to age moved to fibe': ('Moved FIBE', 'Lender Movement'),
+ 'due to low abb case rejected moved to nps': ('Moved NPS', 'Lender Movement'),
+ "due to low abb need alternative banking and customer doesn't have alternative banking": ('Low ABB',
+                                                                                           'Credit Profile'),
+ 'due to the roi, the customer is not interested in proceeding with the offer.': ('ROI Issue',
+                                                                                  'Customer/Project'),
+ 'duplicate lead': ('Duplicate', 'Lead Quality'),
+ 'duplicate lead, confirmed by sales team': ('Duplicate', 'Lead Quality'),
+ 'ebill is on customer father name & documents are pending to proceed with login': ('Docs Pending',
+                                                                                    'Documentation'),
+ 'ebill is on father name & need documents to proceed. want confirmation from customer & sales person': ('Docs '
+                                                                                                         'Pending',
+                                                                                                         'Documentation'),
+ 'ecofy': ('Moved Ecofy', 'Lender Movement'),
+ 'ecofy rejected and case approved in credit fair': ('Credit Reject', 'Credit Decision'),
+ 'fcu rejected': ('Credit Reject', 'Credit Decision'),
+ 'finance rejected loan loan1066': ('Credit Reject', 'Credit Decision'),
+ 'finance rejected loan loan934': ('Credit Reject', 'Credit Decision'),
+ 'finance rejected loan loan945': ('Credit Reject', 'Credit Decision'),
+ 'finance rejected loan loan983': ('Credit Reject', 'Credit Decision'),
+ 'glitch': ('Tech Issue', 'System'),
+ 'high consumption e bill required. moved to credit fair': ('Moved CF', 'Lender Movement'),
+ 'high dpd': ('High DPD', 'Credit Profile'),
+ "high dpd's and overdue in active loans": ('Multiple Credit Issues', 'Credit Profile'),
+ 'high dpd+ low cibil': ('Multiple Credit Issues', 'Credit Profile'),
+ 'high dpds': ('High DPD', 'Credit Profile'),
+ 'high dpds & over dues in existing loans': ('High DPD', 'Credit Profile'),
+ 'highdpds': ('High DPD', 'Credit Profile'),
+ 'hold': ('Hold', 'Pending/Hold'),
+ 'hold case': ('Hold', 'Pending/Hold'),
+ 'incompleted docs': ('Docs Pending', 'Documentation'),
+ 'internal credit score below the prescribed level (bre2-a5) | auto-rejection! internal credit score is lower than the prescribed level': ('Credit '
+                                                                                                                                           'Reject',
+                                                                                                                                           'Credit '
+                                                                                                                                           'Decision'),
+ 'internal credit score lower than prescribed level (bre2-a5)| auto rejection! internal credit score lower than prescribed level': ('Credit '
+                                                                                                                                    'Reject',
+                                                                                                                                    'Credit '
+                                                                                                                                    'Decision'),
+ 'it is login with other vendor & need to be rejected to proceed with us': ('Other Vendor', 'Lead Quality'),
+ "it's logged in other vendor": ('Other Vendor', 'Lead Quality'),
+ 'junk lead': ('Junk Lead', 'Lead Quality'),
+ 'just lead created': ('New Lead', 'Processing'),
+ 'kcc 90+ dpds': ('High DPD', 'Credit Profile'),
+ 'kcc dpd, low cibil': ('Multiple Credit Issues', 'Credit Profile'),
+ 'kisan credit card dpd is 60+ dpd': ('High DPD', 'Credit Profile'),
+ 'lead2719 disbursement done for another project customer need time,confirmed by sales team.': ('Cust. '
+                                                                                                'Pending',
+                                                                                                'Customer/Project'),
+ 'loan status changed for loan1149': ('Status Changed', 'Processing'),
+ 'loan status changed for loan1152': ('Status Changed', 'Processing'),
+ 'login': ('Login/Processing', 'Processing'),
+ 'login in credit fair': ('Moved CF', 'Lender Movement'),
+ 'login in ecofy': ('Moved Ecofy', 'Lender Movement'),
+ 'login in fibe': ('Moved FIBE', 'Lender Movement'),
+ 'login in nps': ('Moved NPS', 'Lender Movement'),
+ 'login on 25-8-2026': ('Login/Processing', 'Processing'),
+ 'low abb': ('Low ABB', 'Credit Profile'),
+ 'low abb - le rejected': ('Low ABB', 'Credit Profile'),
+ 'low abb and 60+ dpds': ('Multiple Credit Issues', 'Credit Profile'),
+ 'low abb and dpds in last 12 months': ('Multiple Credit Issues', 'Credit Profile'),
+ 'low abb and multiple dpds': ('Multiple Credit Issues', 'Credit Profile'),
+ 'low abb cibil score -3': ('Multiple Credit Issues', 'Credit Profile'),
+ 'low abb moved to nps': ('Moved NPS', 'Lender Movement'),
+ 'low abb need another statement': ('Low ABB', 'Credit Profile'),
+ 'low abbb': ('Low ABB', 'Credit Profile'),
+ 'low aqb': ('Low ABB', 'Credit Profile'),
+ 'low cibil': ('Low CIBIL', 'Credit Profile'),
+ 'low cibil & applies before': ('Low CIBIL', 'Credit Profile'),
+ 'low cibil 429': ('Low CIBIL', 'Credit Profile'),
+ 'low cibil 529': ('Low CIBIL', 'Credit Profile'),
+ 'low cibil and dpds in housing loan': ('Multiple Credit Issues', 'Credit Profile'),
+ 'low cibil and high dpds': ('Multiple Credit Issues', 'Credit Profile'),
+ 'madatampalli case bank manager not supporting': ('Age Issue', 'Policy'),
+ 'manual action : reject 10000000010334 same applicant already rejected same e-bill and address. (knockoff reject - with reason ovd)': ('Credit '
+                                                                                                                                        'Reject',
+                                                                                                                                        'Credit '
+                                                                                                                                        'Decision'),
+ 'meter name change': ('KYC/Mismatch', 'Documentation'),
+ 'mostly gold loans and negative pincode , risky case , please share bank statement': ('Docs Pending',
+                                                                                       'Documentation'),
+ 'move to solfin': ('Moved Solfin', 'Lender Movement'),
+ 'moved fibe': ('Moved FIBE', 'Lender Movement'),
+ 'moved solfin': ('Moved Solfin', 'Lender Movement'),
+ 'moved to bajaj': ('Moved Bajaj', 'Lender Movement'),
+ 'moved to ecofy': ('Moved Ecofy', 'Lender Movement'),
+ 'moved to fibe': ('Moved FIBE', 'Lender Movement'),
+ 'moved to fibe due to partially approved in fibe': ('Moved FIBE', 'Lender Movement'),
+ 'moved to nps': ('Moved NPS', 'Lender Movement'),
+ 'moved to solfin': ('Moved Solfin', 'Lender Movement'),
+ 'nach done in fibe': ('NACH Done', 'Processing'),
+ 'name mismatched with bill and bank passbook after bill updating name we can do': ('KYC/Mismatch',
+                                                                                    'Documentation'),
+ 'need a active & clear ifsc code to proceed with login': ('Bank Issue', 'Banking'),
+ 'need co app documents': ('Docs Pending', 'Documentation'),
+ 'new lead2796': ('New Lead', 'Processing'),
+ 'no bank loan offer in customer existing bank. moved to ecofy': ('Moved Ecofy', 'Lender Movement'),
+ 'not confirmed': ('Pending Confirmation', 'Pending/Hold'),
+ 'not interested': ('Not Interested', 'Customer/Project'),
+ 'not yet received signed franking documents & no confirmation regarding this from customer': ('Docs Pending',
+                                                                                               'Documentation'),
+ 'nps': ('Moved NPS', 'Lender Movement'),
+ 'partial approval': ('Partial Approval', 'Approval'),
+ 'partial approved': ('Partial Approval', 'Approval'),
+ 'partial approved moved to credit fair': ('Moved CF', 'Lender Movement'),
+ 'partially approved , moved to solfin': ('Moved Solfin', 'Lender Movement'),
+ 'pending at sales end': ('Sales Pending', 'Internal'),
+ 'pending at sales end. not provided bank details to proceed': ('Sales Pending', 'Internal'),
+ 'pending at sales end. not submitted signed agreement documents': ('Sales Pending', 'Internal'),
+ 'pending from sales end': ('Sales Pending', 'Internal'),
+ 'present bank account is not active & need alternative bank account to proceed': ('Bank Issue', 'Banking'),
+ 'price not confrimed': ('Sales Pending', 'Internal'),
+ 'project cancelled': ('Project Cancelled', 'Customer/Project'),
+ 'reason: reject this case due to income is low and abb is low and multiple dpd and overdue amount. remarks: reject this case due to income is low and abb is low and multiple dpd and overdue amount': ('Multiple '
+                                                                                                                                                                                                         'Credit '
+                                                                                                                                                                                                         'Issues',
+                                                                                                                                                                                                         'Credit '
+                                                                                                                                                                                                         'Profile'),
+ 'registered with another vendor': ('Other Vendor', 'Lead Quality'),
+ 'registered with other vendor': ('Other Vendor', 'Lead Quality'),
+ 'rejected as customer is having large check bounces': ('WOF/Default', 'Credit Profile'),
+ 'rejected cx not interested': ('Not Interested', 'Customer/Project'),
+ 'rejected due to 60+ dpd in last 12 months in multiple loans + cibil score is low + default outstanding above 1 lakh + co applicant is also doing defaults + abb is (1)rs + banking is almost nil': ('Multiple '
+                                                                                                                                                                                                      'Credit '
+                                                                                                                                                                                                      'Issues',
+                                                                                                                                                                                                      'Credit '
+                                                                                                                                                                                                      'Profile'),
+ 'rejected due to 90+ dpd in last 12 months in multiple loans + default outstanding above 5 lakh + abb is low + overall banking is nil.': ('Multiple '
+                                                                                                                                           'Credit '
+                                                                                                                                           'Issues',
+                                                                                                                                           'Credit '
+                                                                                                                                           'Profile'),
+ 'rejected due to 900+ dpd in last 12 months + abb is too low 1k + marginal income': ('Multiple Credit '
+                                                                                      'Issues',
+                                                                                      'Credit Profile'),
+ 'rejected due to cibil score is low + default outstanding 28k + recent 60+ dpd in loans + abb is low.': ('Multiple '
+                                                                                                          'Credit '
+                                                                                                          'Issues',
+                                                                                                          'Credit '
+                                                                                                          'Profile'),
+ 'rejected due to negative profile.': ('Credit Reject', 'Credit Decision'),
+ 'rejected due to ntc case + income is low + abb is low': ('Low ABB', 'Credit Profile'),
+ 'rejected due to ntc case + tier 3 + low abb + required % risk score criteria not met.': ('Low ABB',
+                                                                                           'Credit Profile'),
+ 'rejected in all': ('Credit Reject', 'Credit Decision'),
+ 'rejected login done in fibe': ('Moved FIBE', 'Lender Movement'),
+ 'rejected nps': ('Credit Reject', 'Credit Decision'),
+ 'relook': ('Relook', 'Processing'),
+ 'required documents are pending at customer end': ('Docs Pending', 'Documentation'),
+ 'salary amount less than internal limit| auto rejection! internal credit score lower than prescribed level': ('Credit '
+                                                                                                               'Reject',
+                                                                                                               'Credit '
+                                                                                                               'Decision'),
+ 'sales not confirmed': ('Pending Confirmation', 'Pending/Hold'),
+ 'sales team not confirmed': ('Pending Confirmation', 'Pending/Hold'),
+ 'sales team not confirmed loan or cash': ('Pending Confirmation', 'Pending/Hold'),
+ 'sales team not confirming': ('Sales Pending', 'Internal'),
+ 'shifted to nps': ('Moved NPS', 'Lender Movement'),
+ 'statement is not enough & low abb. moved to nps': ('Moved NPS', 'Lender Movement'),
+ 'statement pending': ('Docs Pending', 'Documentation'),
+ 'suit filed in tractor loan': ('WOF/Default', 'Credit Profile'),
+ 'system rejected in sbi branch in hi-tech branch': ('Credit Reject', 'Credit Decision'),
+ 'technical glitch': ('Tech Issue', 'System'),
+ 'temple cannot be process for loan': ('Commercial/Policy', 'Policy'),
+ 'the applicant had one previous loan, which also had defaults + tier 3 case + banking is almost nill overall case rejected': ('Multiple '
+                                                                                                                               'Credit '
+                                                                                                                               'Issues',
+                                                                                                                               'Credit '
+                                                                                                                               'Profile'),
+ 'the applicant’s cibil report shows a current overdue amount of ₹17,407.00. additionally, a recent 60+ dpd has been reported within the last 12 months.+ tier 3 case + risk score matrix not met overall case rejected': ('Multiple '
+                                                                                                                                                                                                                           'Credit '
+                                                                                                                                                                                                                           'Issues',
+                                                                                                                                                                                                                           'Credit '
+                                                                                                                                                                                                                           'Profile'),
+ 'the applicant’s cibil report shows a current overdue amount of ₹31,340.00, along with a recent 60+ dpd. overall case rejected': ('Multiple '
+                                                                                                                                   'Credit '
+                                                                                                                                   'Issues',
+                                                                                                                                   'Credit '
+                                                                                                                                   'Profile'),
+ 'the applicant’s cibil report shows a current overdue amount of ₹35,322.00. additionally, a recent 60+ dpd has been reported in the housing loan within the last 12 months.overall case rejected': ('Multiple '
+                                                                                                                                                                                                     'Credit '
+                                                                                                                                                                                                     'Issues',
+                                                                                                                                                                                                     'Credit '
+                                                                                                                                                                                                     'Profile'),
+ "the case has been rejected because the applicant has a cibil default with a credit score of 661 and recent dpds in the personal loan along with an overdue balance of ₹17,600 + the applicant's banking activity is low, with an average bank balance of ₹1,755. hence case rejected": ('Age '
+                                                                                                                                                                                                                                                                                          'Issue',
+                                                                                                                                                                                                                                                                                          'Policy'),
+ "the case has been rejected because the electricity bill amount is low at ₹72, and the proposed emi is high + the applicant has recent 60+ dpds in the two-wheeler loan during the last 12 months + the applicant's income is marginal, hence case rejected.": ('ROI/EMI '
+                                                                                                                                                                                                                                                                 'Issue',
+                                                                                                                                                                                                                                                                 'Customer/Project'),
+ 'the case is rejected due to cibil,score is low and dpd in last 12 month secure loan.': ('Multiple Credit '
+                                                                                          'Issues',
+                                                                                          'Credit Profile'),
+ 'the current banking abb is almost nil.': ('Low ABB', 'Credit Profile'),
+ 'there was no proper confirmation from the key accounts team. initially, the loan tenure was 48 months, and later it was changed to 60 months. due to this lack of clear communication, customers were processed with incorrect information, leading to confusion and cancellations': ('Project '
+                                                                                                                                                                                                                                                                                        'Cancelled',
+                                                                                                                                                                                                                                                                                        'Customer/Project'),
+ 'this case due to cibil is low and multiple loans dpd and overdue amount 41,520': ('Multiple Credit Issues',
+                                                                                    'Credit Profile'),
+ 'this lead duplicate lead2493 sales team created same customer with another lead lead2619': ('Duplicate',
+                                                                                              'Lead Quality'),
+ 'vendor change': ('Vendor Change', 'Lead Quality'),
+ 'wof in consumer loan': ('WOF/Default', 'Credit Profile'),
+ 'wof in pl': ('WOF/Default', 'Credit Profile'),
+ 'wof in pl 650 cibil': ('Multiple Credit Issues', 'Credit Profile'),
+ 'wof in two wheeler loan': ('WOF/Default', 'Credit Profile')}
+
+def _t7_norm_remark(value):
+    return re.sub(r"\s+", " ", clean_text(value).casefold()).strip()
+
+def _t7_map_remark(value):
+    raw = clean_text(value)
+    if not raw:
+        return ("No Remark", "Unmapped")
+    mapped = T7_REMARK_MAP.get(_t7_norm_remark(raw))
+    return mapped if mapped else (raw[:90], "Unmapped")
+
 def _t7_bucket(stage, substage):
-    stg = clean_text(stage).strip().lower()
-    sub = clean_text(substage).strip().lower()
-    combo = f"{stg} {sub}"
-    if "reject" in combo or "declin" in combo:
-        return "Rejected"
-    if "approv" in combo or "sanction" in combo:
-        return "Approved"
-    if "document" in combo and ("submit" in combo or "submitted" in combo):
-        return "Documents Submitted"
-    if "login" in combo:
-        return "Login Done"
+    out = classify_attempt_outcome(stage, substage)
+    if out in {"Approved", "Rejected", "Login Done", "Documents Submitted"}:
+        return out
     return "Other / Review"
 
 def _t7_pct(n, d):
-    try:
-        return (float(n) / float(d) * 100.0) if float(d) else 0.0
-    except Exception:
-        return 0.0
+    return (float(n) / float(d) * 100.0) if d else 0.0
+
+def _t7_esc(v):
+    return html.escape(clean_text(v))
 
 t7 = attempt_table_source.copy()
 
 if t7.empty:
-    st.info("No attempt journey is available under the current filters.")
+    st.info("No attempt journey is available for Table 7 under the current filters.")
 else:
     t7["_T7_Attempt"] = pd.to_numeric(t7["Attempt"], errors="coerce")
     t7["_T7_Provider"] = t7["Provider"].apply(clean_text).apply(normalize_provider)
@@ -8606,150 +9005,797 @@ else:
         & t7["_CaseIndex"].notna()
     ].copy()
     t7["_T7_Attempt"] = t7["_T7_Attempt"].astype(int)
-    t7 = t7.loc[t7["_T7_Attempt"].between(1, 5)].copy()
+
+    if "Comments" in period_login_cases.columns:
+        _comment_lookup = period_login_cases["Comments"].to_dict()
+        t7["_T7_Comment"] = t7["_CaseIndex"].map(_comment_lookup).fillna("").astype(str)
+    else:
+        t7["_T7_Comment"] = ""
+
+    _mapped = t7["_T7_Comment"].apply(_t7_map_remark)
+    t7["_T7_ShortRemark"] = _mapped.apply(lambda x: x[0])
+    t7["_T7_RemarkGroup"] = _mapped.apply(lambda x: x[1])
+
     t7 = (
         t7.sort_values(["_CaseIndex", "_T7_Attempt", "Attempt Date"])
-          .drop_duplicates(["_CaseIndex", "_T7_Attempt"], keep="first")
-          .copy()
+        .drop_duplicates(["_CaseIndex", "_T7_Attempt"], keep="first")
+        .copy()
     )
 
     a1 = t7.loc[t7["_T7_Attempt"].eq(1)].copy()
     total_cases = int(a1["_CaseIndex"].nunique())
+
     latest_t7 = (
         t7.sort_values(["_CaseIndex", "_T7_Attempt"])
-          .drop_duplicates("_CaseIndex", keep="last")
+        .drop_duplicates("_CaseIndex", keep="last")
     )
-    approved_ids = set(t7.loc[t7["_T7_Outcome"].eq("Approved"), "_CaseIndex"])
-    pending_ids = set(latest_t7.loc[
-        latest_t7["_T7_Outcome"].isin(["Login Done", "Documents Submitted", "Other / Review"]),
-        "_CaseIndex"
-    ])
-    rejected_latest_ids = set(latest_t7.loc[latest_t7["_T7_Outcome"].eq("Rejected"), "_CaseIndex"])
+    approved_any_ids = set(t7.loc[t7["_T7_Outcome"].eq("Approved"), "_CaseIndex"])
+    rejected_any_ids = set(t7.loc[t7["_T7_Outcome"].eq("Rejected"), "_CaseIndex"])
+    pending_latest_ids = set(
+        latest_t7.loc[
+            latest_t7["_T7_Outcome"].isin(["Login Done", "Documents Submitted", "Other / Review"]),
+            "_CaseIndex",
+        ]
+    )
     avg_attempts = float(t7.groupby("_CaseIndex")["_T7_Attempt"].max().mean()) if not t7.empty else 0.0
 
-    # Compact KPI strip — retained, but no explanatory text below the chart.
+    # ---------- KPI strip ----------
     st.markdown("""
     <style>
-      .cj68{border-radius:12px;padding:10px 14px;min-height:68px;color:#fff;
-            box-shadow:0 3px 12px rgba(15,23,42,.10)}
-      .cj68 small{font-size:9px;font-weight:850;letter-spacing:.35px;opacity:.92}
-      .cj68 b{display:block;font-size:25px;line-height:1.05;margin:5px 0 1px}
-      .cj68 span{font-size:9px;font-weight:700;opacity:.88}
-      .cj68-blue{background:linear-gradient(135deg,#174A78,#2477B4)}
-      .cj68-green{background:linear-gradient(135deg,#16855B,#2FB67A)}
-      .cj68-amber{background:linear-gradient(135deg,#C98500,#ECAF18)}
-      .cj68-red{background:linear-gradient(135deg,#BC3E4B,#E35B63)}
-      .cj68-purple{background:linear-gradient(135deg,#5548C7,#7964DF)}
+    .cj-kpi{border-radius:11px;padding:11px 14px;color:#fff;min-height:72px;
+    box-shadow:0 4px 13px rgba(25,55,82,.10)}
+    .cj-kpi small{font-size:10px;font-weight:800;opacity:.92}
+    .cj-kpi strong{display:block;font-size:26px;line-height:1.05;margin:4px 0 2px}
+    .cj-kpi span{font-size:10px;font-weight:700;opacity:.92}
+    .cj-blue{background:linear-gradient(135deg,#173E70,#0E5B91)}
+    .cj-green{background:linear-gradient(135deg,#1B9563,#31B77A)}
+    .cj-amber{background:linear-gradient(135deg,#DE9500,#F3B51B)}
+    .cj-red{background:linear-gradient(135deg,#C33A49,#E45D5D)}
+    .cj-purple{background:linear-gradient(135deg,#5F4FD1,#7B62E6)}
     </style>
     """, unsafe_allow_html=True)
-    _kc = st.columns(5)
-    _kpis = [
-        ("cj68-blue", "TOTAL CASES", total_cases, "Entered credit journey"),
-        ("cj68-green", "APPROVED", len(approved_ids), f"{_t7_pct(len(approved_ids), total_cases):.1f}% of cases"),
-        ("cj68-amber", "PENDING", len(pending_ids), f"{_t7_pct(len(pending_ids), total_cases):.1f}% latest status"),
-        ("cj68-red", "REJECTED", len(rejected_latest_ids), f"{_t7_pct(len(rejected_latest_ids), total_cases):.1f}% latest status"),
-        ("cj68-purple", "AVG. ATTEMPTS", f"{avg_attempts:.1f}", "Per case"),
-    ]
-    for _col, (_cls, _lab, _val, _sub) in zip(_kc, _kpis):
-        with _col:
-            _shown = _val if isinstance(_val, str) else f"{_val:,}"
+
+    k1,k2,k3,k4,k5 = st.columns(5)
+    for col, cls, label, value, sub in [
+        (k1,"cj-blue","TOTAL CASES",total_cases,"Filtered journey"),
+        (k2,"cj-green","TOTAL APPROVED",len(approved_any_ids),f"{_t7_pct(len(approved_any_ids),total_cases):.1f}%"),
+        (k3,"cj-amber","TOTAL PENDING",len(pending_latest_ids),f"{_t7_pct(len(pending_latest_ids),total_cases):.1f}% latest state"),
+        (k4,"cj-red","TOTAL REJECTED",len(rejected_any_ids),f"{_t7_pct(len(rejected_any_ids),total_cases):.1f}% rejected somewhere"),
+        (k5,"cj-purple","AVG. ATTEMPTS / CASE",f"{avg_attempts:.1f}","Recorded attempts"),
+    ]:
+        with col:
+            shown = value if isinstance(value, str) else f"{value:,}"
             st.markdown(
-                f'<div class="cj68 {_cls}"><small>{_lab}</small><b>{_shown}</b><span>{_sub}</span></div>',
+                f'<div class="cj-kpi {cls}"><small>{label}</small>'
+                f'<strong>{shown}</strong><span>{sub}</span></div>',
                 unsafe_allow_html=True,
             )
 
-    # Build one clean Sankey: each node is Attempt + Lender. Only actual next
-    # attempts are connected, so line thickness directly represents case flow.
-    _node_keys = []
-    _node_seen = set()
-    for _att in range(1, 6):
-        _part = t7.loc[t7["_T7_Attempt"].eq(_att)]
-        _counts = _part.groupby("_T7_Provider")["_CaseIndex"].nunique().sort_values(ascending=False)
-        for _provider in _counts.index:
-            _key = (_att, _provider)
-            if _key not in _node_seen:
-                _node_seen.add(_key)
-                _node_keys.append(_key)
-
-    _node_index = {k:i for i,k in enumerate(_node_keys)}
-    _node_labels = []
-    _node_custom = []
-    for _att, _provider in _node_keys:
-        _part = t7.loc[(t7["_T7_Attempt"].eq(_att)) & (t7["_T7_Provider"].eq(_provider))]
-        _cases = int(_part["_CaseIndex"].nunique())
-        _ap = int(_part.loc[_part["_T7_Outcome"].eq("Approved"), "_CaseIndex"].nunique())
-        _pd = int(_part.loc[_part["_T7_Outcome"].isin(["Login Done","Documents Submitted","Other / Review"]), "_CaseIndex"].nunique())
-        _rj = int(_part.loc[_part["_T7_Outcome"].eq("Rejected"), "_CaseIndex"].nunique())
-        _node_labels.append(f"A{_att} · {_provider}<br>{_cases} cases")
-        _node_custom.append([_att, _provider, _cases, _ap, _pd, _rj])
-
-    _sources, _targets, _values, _link_custom = [], [], [], []
-    for _cid, _grp in t7.groupby("_CaseIndex", sort=False):
-        _g = _grp.sort_values("_T7_Attempt")
-        _rows = list(_g.to_dict("records"))
-        for _i in range(len(_rows)-1):
-            _r1, _r2 = _rows[_i], _rows[_i+1]
-            _a1, _a2 = int(_r1["_T7_Attempt"]), int(_r2["_T7_Attempt"])
-            if _a2 != _a1 + 1:
+    # ---------- Build exact route cohorts ----------
+    # Each route node is identified by its complete path:
+    # (A1 lender, A2 lender, ... current lender)
+    route_nodes = {}
+    for cid, grp in t7.groupby("_CaseIndex", sort=False):
+        rows = grp.sort_values("_T7_Attempt")
+        path = []
+        previous_rejected = True
+        for _, rr in rows.iterrows():
+            att = int(rr["_T7_Attempt"])
+            if att < 1 or att > 5:
                 continue
-            _k1 = (_a1, _r1["_T7_Provider"])
-            _k2 = (_a2, _r2["_T7_Provider"])
-            if _k1 in _node_index and _k2 in _node_index:
-                _sources.append(_node_index[_k1]); _targets.append(_node_index[_k2]); _values.append(1)
-                _link_custom.append(f"A{_a1} {_r1['_T7_Provider']} → A{_a2} {_r2['_T7_Provider']}")
+            # A2+ is only a valid continuation when the preceding recorded attempt rejected.
+            if att > 1 and not previous_rejected:
+                break
+            provider = rr["_T7_Provider"]
+            path.append(provider)
+            key = tuple(path)
+            node = route_nodes.setdefault(key, {
+                "attempt": att, "provider": provider, "cases": set(),
+                "approved": set(), "pending": set(), "rejected": set(),
+                "login": set(), "docs": set(), "other": set(),
+                "reason_counts": {}
+            })
+            node["cases"].add(cid)
+            outcome = rr["_T7_Outcome"]
+            if outcome == "Approved":
+                node["approved"].add(cid)
+            elif outcome == "Rejected":
+                node["rejected"].add(cid)
+                reason = clean_text(rr["_T7_ShortRemark"]) or "No Remark"
+                node["reason_counts"].setdefault(reason, set()).add(cid)
+            else:
+                node["pending"].add(cid)
+                if outcome == "Login Done":
+                    node["login"].add(cid)
+                elif outcome == "Documents Submitted":
+                    node["docs"].add(cid)
+                else:
+                    node["other"].add(cid)
+            previous_rejected = (outcome == "Rejected")
 
-    # Aggregate identical lender-to-lender transitions so the diagram stays clean.
-    _flow = {}
-    for _s, _t, _v, _desc in zip(_sources, _targets, _values, _link_custom):
-        _flow[(_s,_t,_desc)] = _flow.get((_s,_t,_desc), 0) + _v
-    _sources = [k[0] for k in _flow]
-    _targets = [k[1] for k in _flow]
-    _link_custom = [k[2] for k in _flow]
-    _values = list(_flow.values())
-
-    if _node_keys:
-        _fig7 = go.Figure(go.Sankey(
-            arrangement="snap",
-            node=dict(
-                pad=22,
-                thickness=22,
-                line=dict(width=0.7),
-                label=_node_labels,
-                customdata=_node_custom,
-                hovertemplate=(
-                    "<b>%{customdata[1]}</b> · A%{customdata[0]}<br>"
-                    "Cases: %{customdata[2]}<br>"
-                    "Approved: %{customdata[3]}<br>"
-                    "Pending: %{customdata[4]}<br>"
-                    "Rejected: %{customdata[5]}<extra></extra>"
-                ),
-            ),
-            link=dict(
-                source=_sources,
-                target=_targets,
-                value=_values,
-                customdata=_link_custom,
-                hovertemplate="<b>%{customdata}</b><br>Moved cases: %{value}<extra></extra>",
-            ),
-        ))
-        _fig7.update_layout(
-            margin=dict(l=10, r=10, t=38, b=10),
-            height=500,
-            paper_bgcolor="white",
-            plot_bgcolor="white",
-            font=dict(size=11, color="#111827"),
-            title=dict(
-                text="Lender Movement Across Attempts",
-                x=0.01, xanchor="left",
-                font=dict(size=15, color="#111827"),
-            ),
+    nodes_by_attempt = {
+        att: sorted(
+            [(path, n) for path, n in route_nodes.items() if n["attempt"] == att],
+            key=lambda z: (-len(z[1]["cases"]), " → ".join(z[0]))
         )
-        st.plotly_chart(_fig7, use_container_width=True, config={"displayModeBar": False})
-    else:
-        st.info("No lender-attempt journey is available under the current filters.")
+        for att in range(1, 6)
+    }
+
+    # ---------- FINAL HORIZONTAL FAMILY TREE: FULL CARDS A1 → A5 ----------
+    # No wrapping, no squeezing, no bank limit.
+    # Every route node uses the same readable card.
+    # The canvas grows horizontally and the user scrolls right.
+
+    def _tree_reason_label(value):
+        raw = clean_text(value)
+        if not raw:
+            return "No Remark"
+        s = re.sub(r"\s+", " ", raw).strip()
+        low = s.casefold()
+
+        if "down payment" in low and ("rengy" in low or "our company" in low):
+            return "Down Payment by Rengy"
+        if "doc" in low and ("pending" in low or "document" in low):
+            return "Docs Pending"
+        if "low cibil" in low or ("cibil" in low and "low" in low):
+            return "Low CIBIL"
+        if "dpd" in low:
+            return "High DPDs"
+        if "foir" in low:
+            return "High FOIR"
+        if "income" in low and ("low" in low or "salary" in low):
+            return "Income Low"
+        if "not available" in low or "unavailable" in low:
+            return "Customer Unavailable"
+        if "move" in low and "solfin" in low:
+            return "Moved to Solfin"
+        if "app detail" in low:
+            return "App Details Needed"
+        if low in {"no remark", "no remarks", "na", "n/a", "none", "-"}:
+            return "No Remark"
+        if len(s) > 44:
+            return "Other"
+        return s[:44]
+
+    # Display-only cleanup of rejection remarks.
+    _tree_case_reason = {}
+    if "_T7_ShortRemark" in t7.columns:
+        for _, _rr in t7.iterrows():
+            _tree_case_reason[_rr["_CaseIndex"]] = _tree_reason_label(_rr["_T7_ShortRemark"])
+
+    for _route, _node in route_nodes.items():
+        _clean = {}
+        for _cid in _node["rejected"]:
+            _reason = _tree_case_reason.get(_cid, "No Remark")
+            _clean.setdefault(_reason, set()).add(_cid)
+        _node["_tree_reasons"] = _clean
+
+    def _tree_children(route):
+        target = len(route) + 1
+        return sorted(
+            [(r, n) for r, n in route_nodes.items()
+             if len(r) == target and r[:-1] == route],
+            key=lambda z: (-len(z[1]["cases"]), z[1]["provider"])
+        )
+
+    def _tree_pct(n, d):
+        return (float(n) / float(d) * 100.0) if d else 0.0
+
+    def _tree_reason_rows(node, limit=4):
+        vals = sorted(
+            ((r, len(ids)) for r, ids in node.get("_tree_reasons", {}).items()),
+            key=lambda z: (-z[1], z[0])
+        )
+        if not vals:
+            return '<div class="empty">No rejected cases</div>'
+
+        shown = vals[:limit]
+        rest = vals[limit:]
+        rows = "".join(
+            f'<div class="mini-row"><span>{html.escape(clean_text(r))}</span><b>{n:,}</b></div>'
+            for r, n in shown
+        )
+        if rest:
+            rows += (
+                f'<div class="mini-row other"><span>Other</span>'
+                f'<b>{sum(n for _, n in rest):,}</b></div>'
+            )
+        return rows
+
+    def _tree_card(route, node):
+        att = node["attempt"]
+        total = max(len(node["cases"]), 1)
+        parent = route[-2] if len(route) > 1 else ""
+        route_line = ""
+        if att > 1:
+            route_line = (
+                f'<div class="route-line">'
+                f'<span>FROM</span> {html.escape(clean_text(parent))} '
+                f'<b>→</b> {html.escape(clean_text(node["provider"]))}'
+                f'</div>'
+            )
+
+        app = len(node["approved"])
+        pend = len(node["pending"])
+        rej = len(node["rejected"])
+
+        # Rejected routing reconciliation:
+        # pushed = unique rejected cases that actually appear in immediate next-attempt child nodes.
+        # left = rejected cases with no immediate next attempt recorded.
+        _child_nodes = _tree_children(route) if att < 5 else []
+        _pushed_ids = set()
+        for _child_route, _child_node in _child_nodes:
+            _pushed_ids.update(node["rejected"].intersection(_child_node["cases"]))
+        pushed = len(_pushed_ids)
+        left = max(rej - pushed, 0)
+
+        routing_badge = ""
+        if rej > 0:
+            routing_badge = f"""
+            <div class="routing-summary">
+              <div class="routing-item pushed">
+                <span>PUSHED</span><b>{pushed:,}</b>
+              </div>
+              <div class="routing-divider"></div>
+              <div class="routing-item left">
+                <span>LEFT</span><b>{left:,}</b>
+              </div>
+            </div>
+            """
+
+        return f"""
+        <div class="t7-card-static">
+        <div class="bank-card a{att}">
+          <div class="bank-head">
+            <span class="attempt-badge">A{att}</span>
+            <div class="bank-name">
+              <b>{html.escape(clean_text(node["provider"]))}</b>
+              <small>{len(node["cases"]):,} cases</small>
+            </div>
+            {routing_badge}
+          </div>
+
+          {route_line}
+
+          <div class="status-grid">
+            <div class="status app">
+              <span>Approved</span><b>{app:,}</b><small>{_tree_pct(app,total):.1f}%</small>
+            </div>
+            <div class="status pend">
+              <span>Pending</span><b>{pend:,}</b><small>{_tree_pct(pend,total):.1f}%</small>
+            </div>
+            <div class="status rej">
+              <span>Rejected</span><b>{rej:,}</b><small>{_tree_pct(rej,total):.1f}%</small>
+            </div>
+          </div>
+
+          <div class="detail-grid">
+            <div class="detail pending-detail">
+              <div class="detail-title">Pending Breakdown</div>
+              <div class="mini-row"><span>Login Done</span><b>{len(node["login"]):,}</b></div>
+              <div class="mini-row"><span>Docs Submitted</span><b>{len(node["docs"]):,}</b></div>
+              <div class="mini-row"><span>Other Pending</span><b>{len(node["other"]):,}</b></div>
+            </div>
+
+            <div class="detail reject-detail">
+              <div class="detail-title">Rejection Reasons</div>
+              {_tree_reason_rows(node, 4)}
+            </div>
+          </div>
+        </div>
+        </div>
+        """
+
+    def _tree_branch(route, node):
+        children = _tree_children(route)
+        child_html = ""
+        if children:
+            child_html = (
+                '<ul>'
+                + "".join(
+                    f'<li>{_tree_branch(child_route, child_node)}</li>'
+                    for child_route, child_node in children
+                )
+                + '</ul>'
+            )
+        elif node["rejected"]:
+            child_html = '<div class="terminal">No further recorded attempt</div>'
+
+        return _tree_card(route, node) + child_html
+
+    a1_nodes = nodes_by_attempt[1]
+
+    tree_html = (
+        '<ul class="tree-root">'
+        + "".join(
+            f'<li>{_tree_branch(route, node)}</li>'
+            for route, node in a1_nodes
+        )
+        + '</ul>'
+    )
+
+    # Width is deliberately NOT constrained to the laptop viewport.
+    # Each leaf gets enough real estate for a readable 300px card.
+    leaf_count = sum(
+        1 for route, node in route_nodes.items()
+        if not _tree_children(route)
+    )
+    a1_count = max(len(a1_nodes), 1)
+    canvas_width = max(
+        1550,
+        a1_count * 325,
+        min(max(leaf_count, a1_count), 40) * 315
+    )
+
+    deepest_attempt = max(
+        [n["attempt"] for n in route_nodes.values()] or [1]
+    )
+    component_height = 125 + deepest_attempt * 330
+
+    board_html = f"""
+    <!doctype html>
+    <html>
+    <head>
+    <meta charset="utf-8">
+    <style>
+    *{{box-sizing:border-box}}
+    html,body{{
+      margin:0;
+      background:#FFFFFF;
+      color:#153451;
+      font-family:Inter,Segoe UI,Arial,sans-serif;
+    }}
+
+    .viewport{{
+      width:100%;
+      overflow-x:scroll;
+      overflow-y:hidden;
+      overflow-anchor:none;
+      background:#FFFFFF;
+      border:1px solid #DDE8F1;
+      border-radius:14px;
+      padding:10px 0 18px;
+      scrollbar-width:auto;
+    }}
+
+    .canvas{{
+      display:inline-block;
+      width:max-content;
+      min-width:max(100%, {canvas_width}px);
+      padding:0 60px 26px 80px;
+      position:relative;
+      vertical-align:top;
+    }}
+
+    .scroll-note{{
+      position:sticky;
+      left:14px;
+      width:max-content;
+      z-index:50;
+      background:#E8F2FA;
+      border:1px solid #C8DDEA;
+      color:#315B78;
+      border-radius:999px;
+      padding:5px 10px;
+      font-size:9px;
+      font-weight:850;
+      margin-bottom:8px;
+    }}
+
+    .root-wrap{{
+      position:sticky;
+      left:0;
+      width:100vw;
+      max-width:100vw;
+      display:flex;
+      justify-content:center;
+      margin-bottom:2px;
+      z-index:20;
+      pointer-events:none;
+    }}
+
+    .root{{
+      width:260px;
+      background:linear-gradient(135deg,#174777,#0D6098);
+      color:#fff;
+      border-radius:10px;
+      text-align:center;
+      padding:9px 12px;
+      box-shadow:0 5px 14px rgba(20,55,85,.14);
+    }}
+    .root small{{display:block;font-size:9px;font-weight:900;letter-spacing:.3px}}
+    .root b{{display:block;font-size:26px;line-height:1.05}}
+
+    /* Classic horizontal family tree.
+       No wrapping: every sibling stays on the same level. */
+    .tree, .tree ul, .tree-root{{
+      padding-top:24px;
+      position:relative;
+      display:flex;
+      white-space:nowrap;
+      margin:0;
+    }}
+
+    /* LEFT-EDGE FIX:
+       Never center the complete oversized tree inside a smaller box.
+       The outer tree begins at the real left edge and expands only rightward. */
+    .tree{{
+      width:max-content;
+      min-width:100%;
+      justify-content:flex-start;
+      padding-left:0;
+      padding-right:0;
+    }}
+
+    .tree > .tree-root{{
+      width:max-content;
+      min-width:max-content;
+      justify-content:flex-start;
+      padding-left:0;
+      padding-right:0;
+    }}
+
+    /* Only child groups center below their own parent. */
+    .tree-root ul{{
+      width:max-content;
+      min-width:max-content;
+      justify-content:center;
+    }}
+
+    .tree-root, .tree-root ul{{
+      list-style:none;
+      padding-left:0;
+    }}
+
+    .tree-root li{{
+      list-style:none;
+      text-align:center;
+      position:relative;
+      padding:24px 7px 0;
+      flex:0 0 auto;
+      white-space:normal;
+    }}
+
+    .tree-root li::before,
+    .tree-root li::after{{
+      content:'';
+      position:absolute;
+      top:0;
+      right:50%;
+      width:50%;
+      height:24px;
+      border-top:2px solid #1765A6;
+    }}
+
+    .tree-root li::after{{
+      right:auto;
+      left:50%;
+      border-left:2px solid #1765A6;
+    }}
+
+    .tree-root li:only-child::before,
+    .tree-root li:only-child::after{{
+      display:none;
+    }}
+
+    .tree-root li:only-child{{
+      padding-top:0;
+    }}
+
+    .tree-root li:first-child::before,
+    .tree-root li:last-child::after{{
+      border:0 none;
+    }}
+
+    .tree-root li:last-child::before{{
+      border-right:2px solid #1765A6;
+      border-radius:0 7px 0 0;
+    }}
+
+    .tree-root li:first-child::after{{
+      border-radius:7px 0 0 0;
+    }}
+
+    .tree-root ul::before{{
+      content:'';
+      position:absolute;
+      top:0;
+      left:50%;
+      border-left:2px solid #D33D3D;
+      width:0;
+      height:24px;
+    }}
+
+    /* Top A1 connection from Total Cases */
+    .root-connector{{
+      width:2px;
+      height:22px;
+      background:#1765A6;
+      margin:0 auto -2px;
+    }}
+
+    .t7-card-static{{
+      display:block;
+      text-decoration:none !important;
+      color:inherit !important;
+      border-radius:14px;
+      outline:none;
+    }}
+    .t7-card-static:hover .bank-card{{
+      transform:translateY(-2px);
+      box-shadow:0 8px 20px rgba(15,23,42,.12);
+      border-color:#2563EB !important;
+    }}
+    .t7-card-link:focus, .t7-card-link:active{{
+      outline:none !important;
+      box-shadow:none !important;
+    }}
+    .bank-card{{
+      width:320px;
+      min-width:320px;
+      background:#fff;
+      border:1.5px solid #65A9ED;
+      border-radius:10px;
+      padding:8px;
+      box-shadow:0 3px 10px rgba(31,70,103,.07);
+      text-align:left;
+      display:inline-block;
+      vertical-align:top;
+    }}
+
+    .bank-card.a2{{border-color:#8C82EA;background:#FCFBFF}}
+    .bank-card.a3{{border-color:#5CBF9C;background:#FBFFFD}}
+    .bank-card.a4{{border-color:#66A9E5;background:#FBFDFF}}
+    .bank-card.a5{{border-color:#DDA15A;background:#FFFDFC}}
+
+    .bank-head{{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      background:linear-gradient(135deg,#EAF3FF,#DDEEFF);
+      border:1px solid #83B8EC;
+      border-radius:7px;
+      padding:10px;
+      margin-bottom:8px;
+      min-height:62px;
+    }}
+    .a2 .bank-head{{background:#F0EDFF;border-color:#A69CF1}}
+    .a3 .bank-head{{background:#EAF9F3;border-color:#80D0B4}}
+    .a4 .bank-head{{background:#EDF6FE;border-color:#8FC0EB}}
+    .a5 .bank-head{{background:#FFF5E9;border-color:#E7B779}}
+
+    .attempt-badge{{
+      width:40px;height:36px;border-radius:8px;
+      background:#1769A5;color:#fff;
+      display:flex;align-items:center;justify-content:center;
+      font-size:12px;font-weight:900;flex:0 0 auto;
+      letter-spacing:.2px;
+      text-rendering:geometricPrecision;
+      -webkit-font-smoothing:antialiased;
+    }}
+    .a2 .attempt-badge{{background:#6657CF}}
+    .a3 .attempt-badge{{background:#258E6C}}
+    .a4 .attempt-badge{{background:#317EBE}}
+    .a5 .attempt-badge{{background:#C47B22}}
+
+    .bank-name b{{
+      display:block;
+      font-size:16px;
+      font-weight:900;
+      line-height:1.12;
+      letter-spacing:.15px;
+      color:#082F55;
+      overflow-wrap:anywhere;
+      text-rendering:geometricPrecision;
+      -webkit-font-smoothing:antialiased;
+    }}
+    .bank-name small{{
+      display:block;
+      font-size:11px;
+      line-height:1.25;
+      font-weight:800;
+      color:#274E6B;
+      margin-top:4px;
+      letter-spacing:.05px;
+      text-rendering:geometricPrecision;
+      -webkit-font-smoothing:antialiased;
+    }}
+
+    .routing-summary{{
+      margin-left:auto;
+      display:flex;
+      align-items:center;
+      gap:7px;
+      flex:0 0 auto;
+      background:rgba(255,255,255,.82);
+      border:1px solid #BFD5E7;
+      border-radius:8px;
+      padding:6px 8px;
+      min-width:112px;
+      justify-content:center;
+      box-shadow:0 1px 3px rgba(25,64,96,.04);
+    }}
+    .routing-item{{
+      min-width:37px;
+      text-align:center;
+      line-height:1;
+    }}
+    .routing-item span{{
+      display:block;
+      font-size:7px;
+      line-height:1.1;
+      font-weight:900;
+      letter-spacing:.18px;
+      margin-bottom:4px;
+    }}
+    .routing-item b{{
+      display:block;
+      font-size:15px;
+      line-height:1;
+      font-weight:950;
+    }}
+    .routing-item.pushed span{{color:#17683D}}
+    .routing-item.pushed b{{color:#08783D}}
+    .routing-item.left span{{color:#A33B3B}}
+    .routing-item.left b{{color:#C02E2E}}
+    .routing-divider{{
+      width:1px;
+      height:26px;
+      background:#D7E2EA;
+    }}
+
+    .route-line{{
+      background:#F8F3FF;
+      border:1px solid #DED5F8;
+      color:#563D7C;
+      border-radius:5px;
+      padding:6px 7px;
+      margin-bottom:7px;
+      font-size:9px;
+      line-height:1.25;
+      font-weight:800;
+      overflow-wrap:anywhere;
+    }}
+    .route-line span{{font-size:8px;font-weight:900;color:#983747}}
+    .route-line b{{color:#D13D3D;padding:0 3px}}
+
+    .status-grid{{
+      display:grid;
+      grid-template-columns:repeat(3,1fr);
+      gap:6px;
+    }}
+    .status{{
+      border:1px solid;
+      border-radius:7px;
+      text-align:center;
+      padding:7px 2px;
+    }}
+    .status span{{display:block;font-size:10px;font-weight:900;letter-spacing:.05px}}
+    .status b{{display:block;font-size:21px;font-weight:900;line-height:1.05;margin:3px 0}}
+    .status small{{font-size:10px;font-weight:850}}
+    .app{{background:#E5F8EC;border-color:#77D09A;color:#17683D}}
+    .pend{{background:#FFF4DB;border-color:#E8BA50;color:#855500}}
+    .rej{{background:#FDE8E8;border-color:#EF7D7D;color:#A72D2D}}
+
+    .detail-grid{{
+      display:grid;
+      grid-template-columns:1fr 1fr;
+      gap:6px;
+      margin-top:7px;
+    }}
+    .detail{{
+      min-width:0;
+      border-radius:7px;
+      padding:7px;
+      min-height:94px;
+    }}
+    .pending-detail{{
+      background:#FFF9E9;
+      border:1px solid #EAC86D;
+      color:#6E4A0B;
+    }}
+    .reject-detail{{
+      background:#FFF0F0;
+      border:1px solid #EF9999;
+      color:#8D3030;
+    }}
+    .detail-title{{
+      font-size:9px;
+      line-height:1.2;
+      font-weight:900;
+      text-transform:uppercase;
+      margin-bottom:6px;
+      letter-spacing:.12px;
+    }}
+    .mini-row{{
+      display:grid;
+      grid-template-columns:minmax(0,1fr) auto;
+      gap:7px;
+      font-size:9px;
+      font-weight:750;
+      line-height:1.35;
+      margin:4px 0;
+    }}
+    .mini-row span{{white-space:normal;overflow-wrap:anywhere}}
+    .mini-row b{{font-weight:950}}
+    .mini-row.other{{
+      border-top:1px dashed rgba(130,60,60,.25);
+      padding-top:3px;
+    }}
+    .empty{{font-size:7px;font-weight:800;opacity:.7}}
+
+    .terminal{{
+      width:170px;
+      margin:7px auto 0;
+      padding:5px 7px;
+      border:1px dashed #D3DEE7;
+      border-radius:6px;
+      background:#FAFCFD;
+      color:#718697;
+      font-size:7px;
+      font-weight:800;
+      text-align:center;
+    }}
+
+    .attempt-legend{{
+      position:sticky;
+      left:14px;
+      z-index:40;
+      display:flex;
+      gap:5px;
+      width:max-content;
+      margin-top:10px;
+    }}
+    .attempt-legend span{{
+      border-radius:5px;
+      padding:4px 7px;
+      font-size:7px;
+      font-weight:950;
+      color:#fff;
+    }}
+    .lg1{{background:#1769A5}} .lg2{{background:#6657CF}}
+    .lg3{{background:#258E6C}} .lg4{{background:#317EBE}} .lg5{{background:#C47B22}}
+
+    /* Make horizontal scrollbar obvious and usable. */
+    .viewport::-webkit-scrollbar{{height:14px}}
+    .viewport::-webkit-scrollbar-track{{background:#E6EEF4;border-radius:10px}}
+    .viewport::-webkit-scrollbar-thumb{{background:#6F9FBE;border-radius:10px;border:3px solid #E6EEF4}}
+    </style>
+    </head>
+    <body>
+      <div class="viewport">
+        <div class="canvas">
+          <div class="scroll-note">↔ Scroll horizontally — all lenders and all A1→A5 branches are preserved</div>
+          <div class="root-wrap">
+            <div class="root"><small>TOTAL CASES</small><b>{total_cases:,}</b></div>
+          </div>
+          <div class="root-connector"></div>
+
+          <div class="tree">
+            {tree_html}
+          </div>
+
+          <div class="attempt-legend">
+            <span class="lg1">A1 First Lender</span>
+            <span class="lg2">A2 Second Lender</span>
+            <span class="lg3">A3 Third Lender</span>
+            <span class="lg4">A4 Fourth Lender</span>
+            <span class="lg5">A5 Fifth Lender</span>
+          </div>
+        </div>
+      </div>
+    </body>
+    </html>
+    """
 
 
-# ============================================================
+    # Static visual only — deliberately no Table 9 click/popup logic.
+    st.components.v1.html(
+        board_html,
+        height=component_height,
+        scrolling=False,
+    )
+
 # 47. INTERACTIVE CASE DETAILS — EXCEL-STYLE HEADER FILTERS
 # ============================================================
 

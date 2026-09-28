@@ -4854,8 +4854,9 @@ _kpi_cards_html = "".join(
             "Approved",
             approved_cases_kpi,
             approved_rate_kpi,
-            total_disbursed,
-            "This Month Disbursed" if selected_month != "All Months" else "Disbursed",
+            approved_attempts_kpi,
+            "Attempts",
+            # Keep the Project Value calculation exactly as in 6.4.
             project_value=disbursed_project_value_kpi,
             project_value_label="Project Value",
             project_value_share=approved_value_share_kpi,
@@ -6025,154 +6026,171 @@ with _second_left:
 
 
     # --------------------------------------------------------
-    # 44A-2. REJECTION ISSUE -> RECOVERY BANK
-    # Uses the current filtered/login-case population.
-    # Left side intentionally fills the space below Stage × Region.
-    # Each row answers: rejection issue -> bank that later approved
-    # the largest number of affected cases.
+    # 44A-2. REJECTION STORY -> LENDER RECOVERY
+    # IMPORTANT: rejection reason comes from the REJECTED ATTEMPT'S OWN
+    # <Nth> Remark field — never from the case-level/final Comments field.
+    # This answers the operational story:
+    #   "Low CIBIL at ECOFY -> moved to NPS -> approved"
+    # and also exposes cases that were never moved after rejection.
     # --------------------------------------------------------
     st.markdown("<div style='height:0;margin-top:-10px'></div>", unsafe_allow_html=True)
-    st.markdown("### 6. Rejection Reasons → Lender Recovery")
-    st.markdown("<div style='height:24px'></div>", unsafe_allow_html=True)
+    st.markdown("### 6. Rejection Story → Lender Recovery")
+    st.caption("Why a lender rejected the case, where it moved next, what recovered, and what was left untouched.")
 
     _ri_source = period_login_cases.copy()
+    _ri_ordinals = {1:"1st", 2:"2nd", 3:"3rd", 4:"4th", 5:"5th", 6:"6th", 7:"7th"}
 
-    def _ri_issue_bucket(value):
-        _t = re.sub(r"\\s+", " ", clean_text(value).casefold()).strip()
-        if not _t:
-            return "Other / No remark"
-        if "cibil" in _t and any(_x in _t for _x in ["low", "below", "score", "credit score"]):
+    def _ri_reason_bucket(value):
+        """Compact operational reason from the rejected attempt's own remark."""
+        raw = re.sub(r"\s+", " ", clean_text(value)).strip()
+        t = raw.casefold()
+        if not t:
+            return "Reason not recorded"
+        if "cibil" in t and any(x in t for x in ["low", "score", "below"]):
             return "Low CIBIL"
-        if any(_x in _t for _x in ["dpd", "overdue", "default", "wof", "write off", "write-off"]):
-            return "DPD / Overdue"
-        if any(_x in _t for _x in ["abb", "banking", "bank statement"]):
+        if any(x in t for x in ["dpd", "overdue", "write off", "write-off", "wof", "default"]):
+            return "DPD / Overdue / Default"
+        if any(x in t for x in ["abb", "banking", "bank statement"]):
             return "Low ABB / Banking"
-        if any(_x in _t for _x in ["income", "salary", "itr"]):
+        if any(x in t for x in ["income", "salary", "itr"]):
             return "Income Issue"
-        if any(_x in _t for _x in ["document", "docs", "kyc", "statement pending"]):
+        if any(x in t for x in ["document", "docs", "kyc", "statement pending"]):
             return "Documentation"
-        if any(_x in _t for _x in ["duplicate", "same applicant", "same customer"]):
+        if any(x in t for x in ["duplicate", "same applicant", "same customer"]):
             return "Duplicate / Existing"
-        if any(_x in _t for _x in ["policy", "commercial", "temple", "age"]):
+        if any(x in t for x in ["policy", "eligibility", "age"]):
             return "Policy / Eligibility"
-        # Preserve the real source reason instead of hiding it under a vague
-        # "Other Rejection" bucket. Keep the label compact for the dashboard.
-        _raw = re.sub(r"\s+", " ", clean_text(value)).strip()
-        if not _raw:
-            return "Other / No remark"
-        _raw = _raw.split("|")[0].strip(" -–—:;")
-        return (_raw[:45] + "…") if len(_raw) > 46 else _raw
+        if any(x in t for x in ["emi", "roi", "obligation"]):
+            return "EMI / Eligibility"
+        # Preserve a real source reason instead of hiding it under "Other".
+        short = raw.split("|")[0].strip(" -–—:;")
+        return (short[:42] + "…") if len(short) > 43 else short
 
-    _ri_comment_col = "Comments" if "Comments" in _ri_source.columns else None
     _ri_rows = []
+    for _idx, _row in _ri_source.iterrows():
+        _attempts = []
+        for _a_no, _suffix in _ri_ordinals.items():
+            _provider = normalize_provider(clean_text(_row.get(f"{_suffix} Provider", "")))
+            if not _provider:
+                continue
+            _stage = clean_text(_row.get(f"{_suffix} Stage", ""))
+            _substage = clean_text(_row.get(f"{_suffix} Substage", ""))
+            _remark = clean_text(_row.get(f"{_suffix} Remark", ""))
+            _attempts.append({
+                "Attempt": _a_no,
+                "Provider": _provider,
+                "Outcome": classify_attempt_outcome(_stage, _substage),
+                "Remark": _remark,
+            })
 
-    if _ri_comment_col:
-        for _idx, _row in _ri_source.iterrows():
-            _comment = clean_text(_row.get(_ri_comment_col, ""))
-            if not _comment:
+        if not _attempts:
+            continue
+
+        for _pos, _att in enumerate(_attempts):
+            if _att["Outcome"] != "Rejected":
                 continue
 
-            # A case enters this panel only when at least one recorded attempt
-            # was actually rejected. This avoids treating every comment as a
-            # rejection reason.
-            _rejected_attempts = []
-            _approved_after = []
-            for _a_no, _suffix in _rb_ordinals.items() if '_rb_ordinals' in locals() else {
-                1:'1st',2:'2nd',3:'3rd',4:'4th',5:'5th',6:'6th',7:'7th'
-            }.items():
-                _p = clean_text(_row.get(f"{_suffix} Provider", ""))
-                _s = clean_text(_row.get(f"{_suffix} Stage", "")).casefold()
-                if not _p:
-                    continue
-                if _s == "rejected":
-                    _rejected_attempts.append(_a_no)
-                elif _s == "approved":
-                    _approved_after.append((_a_no, normalize_provider(_p)))
+            _later = [x for x in _attempts[_pos + 1:] if x["Provider"]]
+            _approved_later = next((x for x in _later if x["Outcome"] == "Approved"), None)
+            _next = _later[0] if _later else None
 
-            if not _rejected_attempts:
-                continue
-
-            _first_rej = min(_rejected_attempts)
-            _later_approvals = [
-                (_a, _b) for _a, _b in _approved_after
-                if _a > _first_rej and _b
-            ]
-            _issue = _ri_issue_bucket(_comment)
+            if _approved_later:
+                _journey_status = "Recovered"
+                _destination = _approved_later["Provider"]
+            elif _next:
+                _journey_status = "Pending / In Progress"
+                _destination = _next["Provider"]
+            else:
+                _journey_status = "Untouched"
+                _destination = "Not moved"
 
             _ri_rows.append({
                 "_CaseIndex": _idx,
-                "Issue": _issue,
-                "Recovery Bank": _later_approvals[0][1] if _later_approvals else "",
+                "Reason": _ri_reason_bucket(_att["Remark"]),
+                "Rejected Bank": _att["Provider"],
+                "Rejected Attempt": _att["Attempt"],
+                "Journey Status": _journey_status,
+                "Destination Bank": _destination,
             })
 
     if _ri_rows:
         _ri_df = pd.DataFrame(_ri_rows)
-        _ri_issue_cases = (
-            _ri_df.groupby("Issue")["_CaseIndex"]
-            .nunique()
-            .sort_values(ascending=False)
+
+        # Each source rejection event appears once. The headline story is ranked
+        # by rejected cases so the most important operational leakage is first.
+        _reason_counts = (
+            _ri_df.groupby("Reason")
+            .agg(
+                Rejected=("_CaseIndex", "nunique"),
+                Recovered=("Journey Status", lambda x: int((x == "Recovered").sum())),
+                Pending=("Journey Status", lambda x: int((x == "Pending / In Progress").sum())),
+                Untouched=("Journey Status", lambda x: int((x == "Untouched").sum())),
+            )
+            .sort_values(["Rejected", "Recovered"], ascending=False)
         )
 
-        _ri_display_rows = []
-        for _issue, _issue_count in _ri_issue_cases.head(6).items():
-            _slice = _ri_df.loc[_ri_df["Issue"].eq(_issue)].copy()
-            _recover = _slice.loc[_slice["Recovery Bank"].ne("")]
-
-            if _recover.empty:
-                _best_bank = "No later approval"
-                _best_n = 0
-            else:
-                _bank_counts = (
-                    _recover.groupby("Recovery Bank")["_CaseIndex"]
-                    .nunique()
-                    .sort_values(ascending=False)
-                )
-                _best_bank = str(_bank_counts.index[0])
-                _best_n = int(_bank_counts.iloc[0])
-
-            _rate = (_best_n / int(_issue_count) * 100.0) if _issue_count else 0.0
-            _ri_display_rows.append({
-                "Issue": _issue,
-                "Rejected": int(_issue_count),
-                "Best Recovery": _best_bank,
-                "Recovered": _best_n,
-                "Recovery %": _rate,
-            })
-
         _ri_html = []
-        for _r in _ri_display_rows:
-            _bank_txt = (
-                f"<b>{html.escape(_r['Best Recovery'])}</b> "
-                f"{_r['Recovered']:,}/{_r['Rejected']:,} ({_r['Recovery %']:.0f}%)"
-                if _r["Recovered"] > 0
-                else "<span style='color:#98A2B3'>No later approval</span>"
-            )
+        for _reason, _stats in _reason_counts.head(6).iterrows():
+            _reason_slice = _ri_df.loc[_ri_df["Reason"].eq(_reason)].copy()
+            _recovered = _reason_slice.loc[_reason_slice["Journey Status"].eq("Recovered")]
+
+            if not _recovered.empty:
+                _paths = (
+                    _recovered.groupby(["Rejected Bank", "Destination Bank"])["_CaseIndex"]
+                    .nunique().sort_values(ascending=False)
+                )
+                (_from_bank, _to_bank), _path_n = _paths.index[0], int(_paths.iloc[0])
+                _path_txt = f"<b>{html.escape(str(_from_bank))}</b> → <b>{html.escape(str(_to_bank))}</b> → Approved <b>{_path_n}</b>"
+            else:
+                _rej_banks = _reason_slice.groupby("Rejected Bank")["_CaseIndex"].nunique().sort_values(ascending=False)
+                _from_bank = str(_rej_banks.index[0]) if not _rej_banks.empty else "—"
+                _path_txt = f"<b>{html.escape(_from_bank)}</b> → No later approval"
+
+            _rej = int(_stats["Rejected"])
+            _rec = int(_stats["Recovered"])
+            _pend = int(_stats["Pending"])
+            _unt = int(_stats["Untouched"])
+            _rate = (_rec / _rej * 100.0) if _rej else 0.0
+
             _ri_html.append(
-                "<div class='ri-row'>"
-                f"<div class='ri-issue'><b>{html.escape(_r['Issue'])}</b>"
-                f"<span>{_r['Rejected']:,} rejected</span></div>"
-                "<div class='ri-arrow'>→</div>"
-                f"<div class='ri-bank'>{_bank_txt}</div>"
+                "<div class='ri-story-row'>"
+                f"<div class='ri-reason'><b>{html.escape(str(_reason))}</b><span>{_rej:,} rejected cases</span></div>"
+                f"<div class='ri-path'>{_path_txt}<span>Recovery {_rec:,}/{_rej:,} ({_rate:.0f}%)</span></div>"
+                f"<div class='ri-state'><b>{_pend:,}</b><span>Pending</span></div>"
+                f"<div class='ri-state ri-untouched'><b>{_unt:,}</b><span>Untouched</span></div>"
                 "</div>"
             )
+
+        _total_rej_story = int(_ri_df["_CaseIndex"].nunique())
+        _total_recovered = int(_ri_df.loc[_ri_df["Journey Status"].eq("Recovered"), "_CaseIndex"].nunique())
+        _total_pending = int(_ri_df.loc[_ri_df["Journey Status"].eq("Pending / In Progress"), "_CaseIndex"].nunique())
+        _total_untouched = int(_ri_df.loc[_ri_df["Journey Status"].eq("Untouched"), "_CaseIndex"].nunique())
 
         st.markdown(
             """
             <style>
-            .ri-wrap{border:1px solid #E2E8F0;border-radius:12px;overflow:hidden;background:#FFFFFF;margin-top:-3px;box-shadow:0 1px 2px rgba(16,24,40,.03)}
-            .ri-row{display:grid;grid-template-columns:minmax(120px,1.1fr) 30px minmax(145px,1fr);align-items:center;padding:3px 10px;border-bottom:1px solid #EEF2F6;font-size:11.5px;color:#0F172A;min-height:28px}
-            .ri-row:last-child{border-bottom:0}
-            .ri-issue{display:flex;flex-direction:column;line-height:1.12}
-            .ri-issue span{font-size:9.5px;color:#667085;margin-top:1px}
-            .ri-arrow{text-align:center;font-size:17px;font-weight:900;color:#64748B}
-            .ri-bank{text-align:left;font-size:10.5px;color:#334155}
+            .ri-summary{display:flex;gap:8px;margin:0 0 7px 0;flex-wrap:wrap}
+            .ri-pill{border:1px solid #E2E8F0;border-radius:8px;background:#FFF;padding:4px 8px;font-size:10px;color:#475467}
+            .ri-pill b{font-size:12px;color:#101828;margin-right:3px}
+            .ri-story-wrap{border:1px solid #E2E8F0;border-radius:12px;overflow:hidden;background:#FFF;box-shadow:0 1px 2px rgba(16,24,40,.03)}
+            .ri-story-row{display:grid;grid-template-columns:minmax(125px,1.05fr) minmax(205px,1.65fr) 58px 64px;gap:7px;align-items:center;padding:6px 9px;border-bottom:1px solid #EEF2F6;color:#0F172A;min-height:39px}
+            .ri-story-row:last-child{border-bottom:0}
+            .ri-reason,.ri-path,.ri-state{display:flex;flex-direction:column;line-height:1.16}
+            .ri-reason b{font-size:11.5px}.ri-reason span,.ri-path span,.ri-state span{font-size:9px;color:#667085;margin-top:2px}
+            .ri-path{font-size:10.5px;color:#344054}.ri-path b{color:#101828}
+            .ri-state{text-align:center;align-items:center}.ri-state b{font-size:12px;color:#B54708}.ri-untouched b{color:#B42318}
             </style>
-            <div class="ri-wrap">
-            """ + "".join(_ri_html) + "</div>",
+            """ +
+            f"<div class='ri-summary'>"
+            f"<div class='ri-pill'><b>{_total_rej_story:,}</b> rejected cases</div>"
+            f"<div class='ri-pill'><b>{_total_recovered:,}</b> recovered later</div>"
+            f"<div class='ri-pill'><b>{_total_pending:,}</b> pending after move</div>"
+            f"<div class='ri-pill'><b>{_total_untouched:,}</b> untouched after rejection</div>"
+            f"</div><div class='ri-story-wrap'>{''.join(_ri_html)}</div>",
             unsafe_allow_html=True,
         )
     else:
-        st.info("No rejected-attempt issue data for the selected filters.")
+        st.info("No rejected-attempt journey data for the selected filters.")
 
 
 with _second_right:

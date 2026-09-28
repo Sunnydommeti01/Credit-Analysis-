@@ -3805,6 +3805,21 @@ st.markdown(
         color:#7191AF !important;
     }
 
+    /* Login date range stays bright/white for fast scanning. */
+    div[data-testid="stDateInput"] > div > div {
+        background:#FFFFFF !important;
+        border:1px solid #D0D5DD !important;
+        box-shadow:none !important;
+    }
+    div[data-testid="stDateInput"] input {
+        color:#101828 !important;
+        background:#FFFFFF !important;
+    }
+    div[data-testid="stDateInput"] svg {
+        fill:#344054 !important;
+        color:#344054 !important;
+    }
+
     div[data-testid="stButton"] > button {
         min-height:35px !important;
         height:35px !important;
@@ -4412,16 +4427,16 @@ with f5:
     if valid_login_dates.empty:
         selected_date = None
         st.date_input(
-            "◷  Login Date", value=None, disabled=True,
+            "◷  Login Date Range", value=None, disabled=True,
             key="credit_top_login_date_disabled",
         )
     else:
         selected_date = st.date_input(
-            "◷  Login Date",
-            value=None,
+            "◷  Login Date Range",
+            value=(),
             min_value=valid_login_dates.min().date(),
             max_value=valid_login_dates.max().date(),
-            help="Optional · based on Login Done On",
+            help="Optional · choose start and end dates based on Login Done On",
             key="credit_top_login_date",
         )
 
@@ -4454,7 +4469,7 @@ _filter_signature_payload = "|".join(
         str(selected_bank),
         str(selected_status),
         str(selected_consultant),
-        str(selected_date or ""),
+        str(selected_date if selected_date else ""),
         str(search_text),
     ]
 )
@@ -4476,14 +4491,25 @@ if selected_status != "All Statuses":
 if selected_consultant != "All Consultants":
     filtered = filtered[filtered["Consultant Name"].eq(selected_consultant)]
 
-# Optional exact-date filter.
-# This intentionally uses Login Done On so it is consistent with the
-# dashboard's login/month reporting logic. It does NOT refetch the API.
-if selected_date is not None:
-    filtered = filtered[
-        filtered["_login_dt"].notna()
-        & filtered["_login_dt"].dt.date.eq(selected_date)
-    ]
+# Optional Login Done On date-range filter. No API refetch is required.
+if selected_date:
+    if isinstance(selected_date, (tuple, list)):
+        if len(selected_date) == 2:
+            _login_start, _login_end = selected_date
+        elif len(selected_date) == 1:
+            _login_start = _login_end = selected_date[0]
+        else:
+            _login_start = _login_end = None
+    else:
+        _login_start = _login_end = selected_date
+
+    if _login_start is not None and _login_end is not None:
+        _login_day = filtered["_login_dt"].dt.date
+        filtered = filtered[
+            filtered["_login_dt"].notna()
+            & _login_day.ge(_login_start)
+            & _login_day.le(_login_end)
+        ]
 
 if search_text:
     q = re.escape(search_text)
@@ -4801,7 +4827,8 @@ _kpi_cards_html = "".join(
             "Approved",
             approved_cases_kpi,
             approved_rate_kpi,
-            approved_attempts_kpi,
+            total_disbursed,
+            "This Month Disbursed" if selected_month != "All Months" else "Disbursed",
             project_value=approved_project_value_kpi,
             project_value_label="Project Value",
             project_value_share=approved_value_share_kpi,
@@ -5196,8 +5223,9 @@ with analysis_2_col:
                 y=_region_logins["Region_Display"],
                 orientation="h",
                 text=[f"<b>{int(v):,}</b>" for v in _region_logins["Logins"]],
-                textposition="outside",
-                textfont=dict(color="#FFFFFF", size=11, family="Arial Black"),
+                textposition="inside",
+                insidetextanchor="middle",
+                textfont=dict(color="#111827", size=12, family="Arial Black"),
                 cliponaxis=False,
                 customdata=_region_custom,
                 hovertemplate=(
@@ -5241,6 +5269,24 @@ with analysis_2_col:
                 "displayModeBar": False,
             },
         )
+
+
+def _cohort_fintech_hover(frame):
+    """Compact cohort hover: disbursed value + fintech split + total cases."""
+    if frame.empty:
+        return "Disbursed Value: <b>₹0</b><br>Fintechs: <b>None</b><br>Total: <b>0</b>"
+    _amt = pd.to_numeric(
+        frame["Disbursed Amount"] if "Disbursed Amount" in frame.columns else 0,
+        errors="coerce",
+    ).fillna(0).clip(lower=0)
+    _banks = clean_series(frame["Bank/NBFC"]) if "Bank/NBFC" in frame.columns else pd.Series("", index=frame.index)
+    _bank_counts = _banks.replace("", "Unconfirmed").value_counts()
+    _fintechs = " · ".join(f"{b}: {int(c):,}" for b, c in _bank_counts.items())
+    return (
+        f"Disbursed Value: <b>{_format_money_compact(float(_amt.sum()))}</b><br>"
+        f"Fintechs: <b>{_fintechs}</b><br>"
+        f"Total: <b>{len(frame):,}</b>"
+    )
 
 
 # ------------------------------------------------------------
@@ -5290,9 +5336,17 @@ with analysis_3_col:
                 "Older Login",
             ]
             _values = [_same, _older]
+            _same_rows_all = _cohort_source.loc[
+                _cohort_source["_login_dt"].notna()
+                & _cohort_source["_LoginMonth"].eq(_cohort_source["_DisbMonth"])
+            ].copy()
+            _older_rows_all = _cohort_source.loc[
+                _cohort_source["_login_dt"].notna()
+                & (_cohort_source["_LoginMonth"] < _cohort_source["_DisbMonth"])
+            ].copy()
             _hovers = [
-                "Login month = disbursement month",
-                "Login month is earlier than disbursement month",
+                _cohort_fintech_hover(_same_rows_all),
+                _cohort_fintech_hover(_older_rows_all),
             ]
 
             fig = go.Figure(
@@ -5361,10 +5415,10 @@ with analysis_3_col:
             _older_hover = "No older-login cases"
 
         _same_hover = (
-            f"{report_start.strftime('%b %Y')} - {_same_count:,}"
-            if _same_count
-            else f"{report_start.strftime('%b %Y')} - 0"
+            f"{report_start.strftime('%b %Y')} - {_same_count:,}<br>"
+            + _cohort_fintech_hover(_same_month_rows)
         )
+        _older_hover = _older_hover + "<br>" + _cohort_fintech_hover(_older_rows)
         _cohort_plot = pd.DataFrame(
             {
                 "Cohort": [

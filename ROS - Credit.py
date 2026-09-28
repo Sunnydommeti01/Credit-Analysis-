@@ -4982,16 +4982,19 @@ def _svg_text(value):
 
 
 def _kpi_svg_board():
-    W, H, gap = 1500, 128, 10
-    card_w, card_h, y = (W - gap * 4) / 5, 112, 8
+    """Previous premium KPI visual language, with the new 5th split KPI."""
+    W, H, gap = 1500, 126, 8
+    card_w = (W - gap * 4) / 5
+    card_h, y = 104, 10
+
     defs = """<defs>
     <linearGradient id="gTotal" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#03417F"/><stop offset=".56" stop-color="#086CC9"/><stop offset="1" stop-color="#063C76"/></linearGradient>
     <linearGradient id="gApproved" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#007356"/><stop offset=".56" stop-color="#00A878"/><stop offset="1" stop-color="#05664F"/></linearGradient>
     <linearGradient id="gPending" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#9D5C00"/><stop offset=".56" stop-color="#E79400"/><stop offset="1" stop-color="#9B5700"/></linearGradient>
     <linearGradient id="gRejected" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#9F1D3D"/><stop offset=".56" stop-color="#E23856"/><stop offset="1" stop-color="#951A38"/></linearGradient>
-    <linearGradient id="gSplit" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#075E54"/><stop offset=".55" stop-color="#0B8F78"/><stop offset="1" stop-color="#075348"/></linearGradient>
-    <filter id="shadow" x="-20%" y="-30%" width="140%" height="170%"><feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#071A2B" flood-opacity=".22"/></filter>
-    <radialGradient id="shine"><stop offset="0" stop-color="#FFFFFF" stop-opacity=".16"/><stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/></radialGradient>
+    <linearGradient id="gSplit" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#351789"/><stop offset=".56" stop-color="#6933D7"/><stop offset="1" stop-color="#3B1B89"/></linearGradient>
+    <filter id="shadow" x="-15%" y="-25%" width="130%" height="170%"><feDropShadow dx="0" dy="5" stdDeviation="5" flood-color="#071A2B" flood-opacity=".22"/></filter>
+    <radialGradient id="shine"><stop offset="0" stop-color="#FFFFFF" stop-opacity=".14"/><stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/></radialGradient>
     </defs>"""
     parts = [f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}">', defs]
 
@@ -4999,10 +5002,12 @@ def _kpi_svg_board():
         if kind == "check":
             return f'<path d="M {cx-8} {cy} l 6 6 l 12 -14" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>'
         if kind == "clock":
-            return f'<circle cx="{cx}" cy="{cy}" r="10" fill="none" stroke="#fff" stroke-width="2.5"/><path d="M {cx} {cy-6} v 7 l 5 3" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round"/>'
+            return f'<circle cx="{cx}" cy="{cy}" r="10" fill="none" stroke="#fff" stroke-width="2.4"/><path d="M {cx} {cy-6} v 7 l 5 3" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/>'
         if kind == "x":
-            return f'<path d="M {cx-7} {cy-7} l 14 14 M {cx+7} {cy-7} l -14 14" fill="none" stroke="#fff" stroke-width="2.8" stroke-linecap="round"/>'
-        return f'<path d="M {cx-10} {cy-7} l 10 -5 l 10 5 l -10 5 z M {cx-10} {cy} l 10 5 l 10 -5 M {cx-10} {cy+7} l 10 5 l 10 -5" fill="none" stroke="#fff" stroke-width="2.3" stroke-linejoin="round"/>'
+            return f'<path d="M {cx-7} {cy-7} l 14 14 M {cx+7} {cy-7} l -14 14" fill="none" stroke="#fff" stroke-width="2.7" stroke-linecap="round"/>'
+        if kind == "split":
+            return f'<circle cx="{cx}" cy="{cy-8}" r="3" fill="none" stroke="#fff" stroke-width="2"/><circle cx="{cx-9}" cy="{cy+9}" r="3" fill="none" stroke="#fff" stroke-width="2"/><circle cx="{cx+9}" cy="{cy+9}" r="3" fill="none" stroke="#fff" stroke-width="2"/><path d="M {cx} {cy-5} v 8 M {cx} {cy+3} h -9 v 3 M {cx} {cy+3} h 9 v 3" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"/>'
+        return f'<path d="M {cx-10} {cy-7} l 10 -5 l 10 5 l -10 5 z M {cx-10} {cy} l 10 5 l 10 -5 M {cx-10} {cy+7} l 10 5 l 10 -5" fill="none" stroke="#fff" stroke-width="2.2" stroke-linejoin="round"/>'
 
     cards = [
         ("Total Cases", total_cases_kpi, 100.0 if total_cases_kpi else 0.0, total_project_value_kpi, total_attempts_kpi, "Total Attempts", "gTotal", "#12B9FF", "layers"),
@@ -5010,42 +5015,51 @@ def _kpi_svg_board():
         ("Pending", pending_cases_kpi, pending_rate_kpi, pending_project_value_kpi, pending_attempts_kpi, "Attempts", "gPending", "#FFC11B", "clock"),
         ("Rejected", rejected_cases_kpi, rejected_rate_kpi, rejected_project_value_kpi, rejected_attempts_kpi, "Attempts", "gRejected", "#FF5C75", "x"),
     ]
+
     for i, (label, count, pct, pvalue, attempts, foot, grad, border, icon) in enumerate(cards):
         x = i * (card_w + gap)
         count_s = f"{count:,}"
         parts += [
-            f'<g filter="url(#shadow)"><rect x="{x:.1f}" y="{y}" width="{card_w:.1f}" height="{card_h}" rx="14" fill="url(#{grad})" stroke="{border}" stroke-width="1.2"/>',
-            f'<ellipse cx="{x+58:.1f}" cy="{y+58}" rx="64" ry="56" fill="url(#shine)"/>',
-            f'<circle cx="{x+37:.1f}" cy="{y+58}" r="20" fill="#fff" fill-opacity=".11" stroke="#fff" stroke-opacity=".34"/>',
-            icon_svg(icon, x+37, y+58),
-            f'<text x="{x+68:.1f}" y="{y+28}" fill="#fff" font-size="12" font-weight="800" font-family="Arial">{_svg_text(label)}</text>',
-            f'<text x="{x+68:.1f}" y="{y+58}" fill="#fff" font-size="27" font-weight="900" font-family="Arial">{count_s}</text>',
-            f'<text x="{x+68+len(count_s)*16:.1f}" y="{y+57}" fill="#fff" font-size="10" font-weight="800" font-family="Arial">({pct:.1f}%)</text>',
-            f'<text x="{x+68:.1f}" y="{y+88}" fill="#fff" fill-opacity=".90" font-size="9" font-weight="700" font-family="Arial">{_svg_text(foot)} - <tspan font-size="10" font-weight="900">{attempts:,}</tspan></text>',
-            f'<text x="{x+card_w-12:.1f}" y="{y+22}" text-anchor="end" fill="#fff" fill-opacity=".78" font-size="7" font-weight="800" font-family="Arial">PROJECT VALUE</text>',
-            f'<text x="{x+card_w-12:.1f}" y="{y+40}" text-anchor="end" fill="#fff" font-size="14" font-weight="900" font-family="Arial">{_svg_text(_format_money_compact(pvalue))}</text></g>'
+            f'<g filter="url(#shadow)"><rect x="{x+2:.1f}" y="{y}" width="{card_w-4:.1f}" height="{card_h}" rx="15" fill="url(#{grad})" stroke="{border}" stroke-width="1.3"/>',
+            f'<rect x="{x+5:.1f}" y="{y+card_h-4}" width="{card_w-10:.1f}" height="4" rx="2" fill="{border}" fill-opacity=".95"/>',
+            f'<ellipse cx="{x+60:.1f}" cy="{y+54}" rx="66" ry="52" fill="url(#shine)"/>',
+            f'<circle cx="{x+37:.1f}" cy="{y+52}" r="20" fill="#fff" fill-opacity=".11" stroke="#fff" stroke-opacity=".34"/>',
+            icon_svg(icon, x+37, y+52),
+            f'<text x="{x+70:.1f}" y="{y+23}" fill="#fff" font-size="11" font-weight="900" font-family="Arial">{_svg_text(label)}</text>',
+            f'<text x="{x+70:.1f}" y="{y+53}" fill="#fff" font-size="27" font-weight="900" font-family="Arial">{count_s}</text>',
+            f'<text x="{x+70+len(count_s)*15.2:.1f}" y="{y+52}" fill="#fff" font-size="9.5" font-weight="900" font-family="Arial">({pct:.1f}%)</text>',
+            f'<text x="{x+70:.1f}" y="{y+79}" fill="#fff" fill-opacity=".94" font-size="8.7" font-weight="800" font-family="Arial">{_svg_text(foot)} - <tspan font-size="9.5" font-weight="900">{attempts:,}</tspan></text>',
+            f'<text x="{x+card_w-13:.1f}" y="{y+18}" text-anchor="end" fill="#fff" fill-opacity=".80" font-size="6.4" font-weight="900" font-family="Arial">PROJECT VALUE</text>',
+            f'<text x="{x+card_w-13:.1f}" y="{y+36}" text-anchor="end" fill="#fff" font-size="13.5" font-weight="900" font-family="Arial">{_svg_text(_format_money_compact(pvalue))}</text></g>'
         ]
 
+    # Fifth KPI: preserve the old purple-card design, but replace Avg Attempts
+    # with the new Approved disbursal split.
     x = 4 * (card_w + gap)
     parts += [
-        f'<g filter="url(#shadow)"><rect x="{x:.1f}" y="{y}" width="{card_w:.1f}" height="{card_h}" rx="14" fill="url(#gSplit)" stroke="#35E1BE" stroke-width="1.2"/>',
-        f'<circle cx="{x+31:.1f}" cy="{y+28}" r="16" fill="#fff" fill-opacity=".11" stroke="#fff" stroke-opacity=".30"/>',
-        icon_svg("check", x+31, y+28),
-        f'<text x="{x+55:.1f}" y="{y+31}" fill="#fff" font-size="11" font-weight="900" font-family="Arial">Approved — Disbursal Split</text>'
+        f'<g filter="url(#shadow)"><rect x="{x+2:.1f}" y="{y}" width="{card_w-4:.1f}" height="{card_h}" rx="15" fill="url(#gSplit)" stroke="#8D5AFF" stroke-width="1.3"/>',
+        f'<rect x="{x+5:.1f}" y="{y+card_h-4}" width="{card_w-10:.1f}" height="4" rx="2" fill="#8D5AFF"/>',
+        f'<ellipse cx="{x+60:.1f}" cy="{y+54}" rx="66" ry="52" fill="url(#shine)"/>',
+        f'<circle cx="{x+37:.1f}" cy="{y+52}" r="20" fill="#fff" fill-opacity=".11" stroke="#fff" stroke-opacity=".34"/>',
+        icon_svg("split", x+37, y+52),
+        f'<text x="{x+70:.1f}" y="{y+22}" fill="#fff" font-size="10.5" font-weight="900" font-family="Arial">Approved — Disbursal Split</text>',
     ]
-    box_gap, inner_x, inner_y = 7, x + 10, y + 50
-    inner_w = (card_w - 20 - box_gap) / 2
+
+    inner_x = x + 70
+    inner_y = y + 34
+    inner_gap = 8
+    inner_w = (card_w - 70 - 14 - inner_gap) / 2
     split_rows = [
-        ("APPROVED & DISBURSED", approved_disbursed_cases_kpi, approved_disbursed_share_kpi, approved_disbursed_project_value_kpi),
-        ("APPROVED & NOT DISBURSED", approved_not_disbursed_cases_kpi, approved_not_disbursed_share_kpi, approved_not_disbursed_project_value_kpi),
+        ("DISBURSED", approved_disbursed_cases_kpi, approved_disbursed_share_kpi, approved_disbursed_project_value_kpi),
+        ("NOT DISBURSED", approved_not_disbursed_cases_kpi, approved_not_disbursed_share_kpi, approved_not_disbursed_project_value_kpi),
     ]
     for j, (label, count, share, value) in enumerate(split_rows):
-        bx = inner_x + j * (inner_w + box_gap)
+        bx = inner_x + j * (inner_w + inner_gap)
         parts += [
-            f'<rect x="{bx:.1f}" y="{inner_y}" width="{inner_w:.1f}" height="52" rx="8" fill="#fff" fill-opacity=".09" stroke="#fff" stroke-opacity=".25"/>',
-            f'<text x="{bx+7:.1f}" y="{inner_y+13}" fill="#fff" fill-opacity=".84" font-size="6.4" font-weight="800" font-family="Arial">{label}</text>',
-            f'<text x="{bx+7:.1f}" y="{inner_y+34}" fill="#fff" font-size="20" font-weight="900" font-family="Arial">{count:,}</text>',
-            f'<text x="{bx+7:.1f}" y="{inner_y+46}" fill="#fff" fill-opacity=".90" font-size="7.5" font-weight="700" font-family="Arial">{share:.1f}% · {_svg_text(_format_money_compact(value))}</text>'
+            f'<rect x="{bx:.1f}" y="{inner_y}" width="{inner_w:.1f}" height="53" rx="7" fill="#fff" fill-opacity=".09" stroke="#fff" stroke-opacity=".25"/>',
+            f'<text x="{bx+inner_w/2:.1f}" y="{inner_y+12}" text-anchor="middle" fill="#fff" fill-opacity=".88" font-size="6.3" font-weight="900" font-family="Arial">{label}</text>',
+            f'<text x="{bx+inner_w/2:.1f}" y="{inner_y+34}" text-anchor="middle" fill="#fff" font-size="20" font-weight="900" font-family="Arial">{count:,}</text>',
+            f'<text x="{bx+inner_w/2:.1f}" y="{inner_y+47}" text-anchor="middle" fill="#fff" fill-opacity=".92" font-size="7" font-weight="800" font-family="Arial">{share:.1f}% · {_svg_text(_format_money_compact(value))}</text>'
         ]
     parts.append('</g></svg>')
     return ''.join(parts)
@@ -5065,7 +5079,7 @@ _kpi_hover = [
     f"<b>Approved & Not Disbursed</b><br>Cases: {approved_not_disbursed_cases_kpi:,}<br>Share of Approved: {approved_not_disbursed_share_kpi:.1f}%<br>Project Value: {_format_money_compact(approved_not_disbursed_project_value_kpi)}<extra></extra>",
 ]
 _kpi_fig.add_trace(go.Scatter(x=_kpi_x, y=[0.5]*6, mode="markers", customdata=_kpi_custom, marker=dict(size=[150,150,150,150,90,90], opacity=0.001), hovertemplate=_kpi_hover, showlegend=False))
-_kpi_fig.update_layout(height=142, margin=dict(l=0,r=0,t=2,b=2), xaxis=dict(range=[0,5],visible=False,fixedrange=True), yaxis=dict(range=[0,1],visible=False,fixedrange=True), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", hoverlabel=dict(bgcolor="white",font_color="#0F172A",font_size=11), dragmode=False)
+_kpi_fig.update_layout(height=132, margin=dict(l=0,r=0,t=2,b=2), xaxis=dict(range=[0,5],visible=False,fixedrange=True), yaxis=dict(range=[0,1],visible=False,fixedrange=True), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", hoverlabel=dict(bgcolor="white",font_color="#0F172A",font_size=11), dragmode=False)
 _kpi_event = st.plotly_chart(_kpi_fig, use_container_width=True, on_select="rerun", selection_mode="points", config={"displayModeBar":False,"displaylogo":False,"scrollZoom":False}, key=f"executive_kpi_board_v710_{_dashboard_filter_signature}_{st.session_state['kpi_click_nonce_v78']}")
 _kpi_points = []
 try:

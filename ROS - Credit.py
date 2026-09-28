@@ -7045,10 +7045,6 @@ with _second_right:
 
                     _show_region_bank_popup()
 
-        st.caption(
-            "A1 60% (6/10) means 6 of 10 cases sent to that bank as the first "
-            "attempt were approved. Hover hides attempts that were never used."
-        )
 
     else:
         st.info(
@@ -8574,6 +8570,26 @@ st.markdown("### 9. Credit Journey — Lender Recovery Path (A1 → A5)")
 # No popup/query-param/component click logic is used in this section.
 # The chart is intentionally visual-only so it cannot interfere with any
 # interaction elsewhere in the dashboard.
+def _t7_bucket(stage, substage):
+    stg = clean_text(stage).strip().lower()
+    sub = clean_text(substage).strip().lower()
+    combo = f"{stg} {sub}"
+    if "reject" in combo or "declin" in combo:
+        return "Rejected"
+    if "approv" in combo or "sanction" in combo:
+        return "Approved"
+    if "document" in combo and ("submit" in combo or "submitted" in combo):
+        return "Documents Submitted"
+    if "login" in combo:
+        return "Login Done"
+    return "Other / Review"
+
+def _t7_pct(n, d):
+    try:
+        return (float(n) / float(d) * 100.0) if float(d) else 0.0
+    except Exception:
+        return 0.0
+
 t7 = attempt_table_source.copy()
 
 if t7.empty:

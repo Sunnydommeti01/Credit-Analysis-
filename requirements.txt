@@ -1,1 +1,9 @@
-
+streamlit
+pandas
+numpy
+plotly
+requests
+matplotlib
+streamlit-aggrid
+streamlit-plotly-events==0.0.6
+streamlit-plotly-events2

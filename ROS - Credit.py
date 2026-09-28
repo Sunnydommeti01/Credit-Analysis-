@@ -3748,6 +3748,19 @@ RENGY_CITY_B64 = "UklGRggkAQBXRUJQVlA4IPwjAQAQHAOdASoXBecAPlUijUSjoiEmLpfbSMAKiW
 st.markdown(
     """
     <style>
+    /* Private/internal dashboard presentation: remove Streamlit chrome and top whitespace. */
+    header[data-testid="stHeader"],
+    [data-testid="stToolbar"],
+    [data-testid="stDecoration"],
+    [data-testid="stStatusWidget"],
+    #MainMenu, footer {
+        display:none !important;
+        visibility:hidden !important;
+        height:0 !important;
+    }
+    section[data-testid="stMain"] > div { padding-top:0 !important; }
+    .main .block-container, .block-container { padding-top:0 !important; margin-top:0 !important; }
+
     :root {
         --rg-bg:#031326;
         --rg-panel:#061B31;
@@ -4668,6 +4681,20 @@ else:
 
 total_project_value_kpi = float(_project_value.sum())
 approved_project_value_kpi = float(_project_value.loc[approved_mask].sum())
+
+# Approved card secondary metric intentionally follows the exact Disbursed
+# population shown in its footer (e.g. This Month Disbursed - 128).
+# Therefore the displayed Project Value reconciles to those same 128 cases,
+# not to the current-status Approved count.
+if "Project Value" in period_disbursed_cases.columns:
+    disbursed_project_value_kpi = float(
+        pd.to_numeric(
+            period_disbursed_cases["Project Value"], errors="coerce"
+        ).fillna(0).clip(lower=0).sum()
+    )
+else:
+    disbursed_project_value_kpi = 0.0
+
 pending_project_value_kpi = float(_project_value.loc[pending_mask].sum())
 rejected_project_value_kpi = float(_project_value.loc[rejected_mask].sum())
 
@@ -4829,7 +4856,7 @@ _kpi_cards_html = "".join(
             approved_rate_kpi,
             total_disbursed,
             "This Month Disbursed" if selected_month != "All Months" else "Disbursed",
-            project_value=approved_project_value_kpi,
+            project_value=disbursed_project_value_kpi,
             project_value_label="Project Value",
             project_value_share=approved_value_share_kpi,
         ),
@@ -4899,7 +4926,7 @@ analysis_1_col, analysis_2_col, analysis_3_col = st.columns(
 # Hover = current status composition for that login day.
 # ------------------------------------------------------------
 with analysis_1_col:
-    st.markdown(f"### 1. Day-wise Logins — {report_label}")
+    st.markdown(f"### 1. Login Volume Trend — {report_label}")
     st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
 
     _day_source = period_login_cases.copy()
@@ -5114,7 +5141,7 @@ with analysis_1_col:
 # Hover shows status composition + project-value exposure.
 # ------------------------------------------------------------
 with analysis_2_col:
-    st.markdown("### 2. Geographic Insights")
+    st.markdown("### 2. Region-wise Logins")
     st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
 
     _region_source = period_login_cases.copy()
@@ -5272,20 +5299,49 @@ with analysis_2_col:
 
 
 def _cohort_fintech_hover(frame):
-    """Compact cohort hover: disbursed value + fintech split + total cases."""
+    """Compact, decision-friendly cohort hover with value reconciliation."""
     if frame.empty:
-        return "Disbursed Value: <b>₹0</b><br>Fintechs: <b>None</b><br>Total: <b>0</b>"
-    _amt = pd.to_numeric(
+        return (
+            "Project Value: <b>₹0</b><br>"
+            "Disbursed Value: <b>₹0</b><br>"
+            "Fintech Mix: <b>None</b>"
+        )
+
+    _disb = pd.to_numeric(
         frame["Disbursed Amount"] if "Disbursed Amount" in frame.columns else 0,
         errors="coerce",
     ).fillna(0).clip(lower=0)
-    _banks = clean_series(frame["Bank/NBFC"]) if "Bank/NBFC" in frame.columns else pd.Series("", index=frame.index)
-    _bank_counts = _banks.replace("", "Unconfirmed").value_counts()
-    _fintechs = " · ".join(f"{b}: {int(c):,}" for b, c in _bank_counts.items())
+    _proj = pd.to_numeric(
+        frame["Project Value"] if "Project Value" in frame.columns else 0,
+        errors="coerce",
+    ).fillna(0).clip(lower=0)
+    _banks = (
+        clean_series(frame["Bank/NBFC"]).replace("", "Unconfirmed")
+        if "Bank/NBFC" in frame.columns
+        else pd.Series("Unconfirmed", index=frame.index)
+    )
+
+    _tmp = pd.DataFrame({
+        "Bank": _banks,
+        "Project": _proj,
+        "Disbursed": _disb,
+    })
+    _mix = (
+        _tmp.groupby("Bank", dropna=False)
+        .agg(Cases=("Bank", "size"), Project=("Project", "sum"), Disbursed=("Disbursed", "sum"))
+        .sort_values(["Cases", "Disbursed"], ascending=False)
+    )
+    _fintech_lines = "<br>".join(
+        f"{html.escape(str(bank))}: <b>{int(row.Cases):,}</b> · "
+        f"PV {_format_money_compact(row.Project)} · "
+        f"Disb {_format_money_compact(row.Disbursed)}"
+        for bank, row in _mix.iterrows()
+    )
+
     return (
-        f"Disbursed Value: <b>{_format_money_compact(float(_amt.sum()))}</b><br>"
-        f"Fintechs: <b>{_fintechs}</b><br>"
-        f"Total: <b>{len(frame):,}</b>"
+        f"Project Value: <b>{_format_money_compact(float(_proj.sum()))}</b><br>"
+        f"Disbursed Value: <b>{_format_money_compact(float(_disb.sum()))}</b><br>"
+        f"<br><b>Fintech Mix</b><br>{_fintech_lines}"
     )
 
 
@@ -5447,8 +5503,7 @@ with analysis_3_col:
                     "<b>%{x} → Disbursed "
                     + report_start.strftime("%b")
                     + "</b><br>"
-                    "Cases: <b>%{y}</b><br><br>"
-                    "Login month breakdown:<br>"
+                    "Cases: <b>%{y}</b><br>"
                     "%{customdata[0]}"
                     "<extra></extra>"
                 ),
@@ -5633,7 +5688,7 @@ with _second_left:
         "TAT Days",
     ] = pd.NA
 
-    st.markdown("### 4. Stage × Region")
+    st.markdown("### 4. Credit Stage Performance by Region")
     st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
 
     if _g4.empty:
@@ -5977,7 +6032,7 @@ with _second_left:
     # the largest number of affected cases.
     # --------------------------------------------------------
     st.markdown("<div style='height:0;margin-top:-10px'></div>", unsafe_allow_html=True)
-    st.markdown("### Rejection Issues → Recovery Bank")
+    st.markdown("### 6. Rejection Reasons → Lender Recovery")
     st.markdown("<div style='height:24px'></div>", unsafe_allow_html=True)
 
     _ri_source = period_login_cases.copy()
@@ -6000,7 +6055,13 @@ with _second_left:
             return "Duplicate / Existing"
         if any(_x in _t for _x in ["policy", "commercial", "temple", "age"]):
             return "Policy / Eligibility"
-        return "Other Rejection"
+        # Preserve the real source reason instead of hiding it under a vague
+        # "Other Rejection" bucket. Keep the label compact for the dashboard.
+        _raw = re.sub(r"\s+", " ", clean_text(value)).strip()
+        if not _raw:
+            return "Other / No remark"
+        _raw = _raw.split("|")[0].strip(" -–—:;")
+        return (_raw[:45] + "…") if len(_raw) > 46 else _raw
 
     _ri_comment_col = "Comments" if "Comments" in _ri_source.columns else None
     _ri_rows = []
@@ -6118,7 +6179,7 @@ with _second_right:
     # --------------------------------------------------------
     # 44B. BANK-WISE DISBURSALS
     # --------------------------------------------------------
-    st.markdown("### Bank-wise Disbursals")
+    st.markdown("### 5. Lender Disbursement Performance")
     st.markdown("<div style='height:24px'></div>", unsafe_allow_html=True)
 
     _bank_disb = filtered.loc[
@@ -6263,7 +6324,7 @@ with _second_right:
     #   attempt's own Stage == Approved
     # --------------------------------------------------------
     st.markdown("<div id='region-bank-card' style='height:0;margin-top:4px'></div>", unsafe_allow_html=True)
-    st.markdown("### Region × Bank Acceptance")
+    st.markdown("### 7. Regional Lender Acceptance Rate")
     st.markdown("<div style='height:24px'></div>", unsafe_allow_html=True)
 
     _rb_attempt_parts = []
@@ -7137,7 +7198,7 @@ st.markdown(
 
 if attempt_month.empty:
     st.markdown(
-        f"### 5. Attempt Priority vs Outcome by Bank — {report_label}"
+        f"### 8. Lender Attempt Performance by Priority — {report_label}"
     )
     st.info("No lender-attempt data for the selected reporting period.")
 
@@ -7235,7 +7296,7 @@ else:
         # targets the actual heading + Region-filter horizontal row.
         st.markdown('<div id="table5-clean-header"></div>', unsafe_allow_html=True)
         st.markdown(
-            f"### 5. Attempt Priority vs Outcome by Bank — {report_label}"
+            f"### 8. Lender Attempt Performance by Priority — {report_label}"
         )
 
     with table_filter_right:
@@ -8485,7 +8546,7 @@ div[data-testid="stHorizontalBlock"]:has(#table5-clean-header) > div {
 """, unsafe_allow_html=True)
 
 st.markdown('<div id="table7"></div>', unsafe_allow_html=True)
-st.markdown("### Table 7: Credit Journey — A1 → A5 Lender Recovery")
+st.markdown("### 9. Credit Journey — Lender Recovery Path (A1 → A5)")
 st.caption(
     "Every recorded lender attempt is shown. Each lender carries its own Approved / Pending / Rejected outcome; "
     "only rejected cases flow to the next attempt."

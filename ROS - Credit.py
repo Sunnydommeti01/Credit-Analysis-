@@ -3307,7 +3307,7 @@ def build_report_row(
 # qualify for any KPI/chart.
 # ============================================================
 
-MAX_DETAIL_WORKERS = 20
+MAX_DETAIL_WORKERS = 32
 
 _thread_local = threading.local()
 
@@ -3671,12 +3671,12 @@ def build_credit_master_optimized(
 # 32. STREAMLIT DATA LOAD
 # ============================================================
 
-@st.cache_data(ttl=21600, show_spinner=False)
-def load_credit_data(extraction_version="ros_listing_status_v3"):
+@st.cache_resource(ttl=21600, show_spinner=False)
+def load_credit_data(extraction_version="ros_listing_status_v4_fast_engine"):
     """
     ONE master load for ALL months.
 
-    Cache duration: 1 hour.
+    Cache duration: 6 hours in memory (zero dataframe serialization on reruns).
     Month / region / provider / status / consultant filters operate
     only on the returned dataframe and do not call the API again.
     """
@@ -3687,10 +3687,22 @@ def load_credit_data(extraction_version="ros_listing_status_v3"):
     lead_detail_cache = {}
 
     # --------------------------------------------------------
-    # A. Bulk master endpoints
+    # A. Bulk master endpoints — PARALLEL COLD-START ENGINE
     # --------------------------------------------------------
-    cp_users = fetch_user_master("channelPartner")
-    vendor_users = fetch_user_master("vendor")
+    # These four sources are independent. Fetching them one after another
+    # wastes wall-clock time, so cold start downloads them concurrently.
+    # Business logic and returned records remain unchanged.
+    with ThreadPoolExecutor(max_workers=4) as _bulk_pool:
+        _bulk_futures = {
+            "cp": _bulk_pool.submit(fetch_user_master, "channelPartner"),
+            "vendor": _bulk_pool.submit(fetch_user_master, "vendor"),
+            "leads": _bulk_pool.submit(fetch_all_crm_leads),
+            "loans": _bulk_pool.submit(fetch_all_loan_records),
+        }
+        cp_users = _bulk_futures["cp"].result()
+        vendor_users = _bulk_futures["vendor"].result()
+        crm_leads = _bulk_futures["leads"].result()
+        loan_list_records = _bulk_futures["loans"].result()
 
     cp_master = create_partner_master(
         cp_users,
@@ -3701,8 +3713,6 @@ def load_credit_data(extraction_version="ros_listing_status_v3"):
         vendor_users,
         "Vendor",
     )
-
-    crm_leads = fetch_all_crm_leads()
 
     # Reuse the already-fetched CRM lead master as the lead-detail cache.
     # This removes hundreds/thousands of duplicate /lead/{id} calls.
@@ -3725,9 +3735,9 @@ def load_credit_data(extraction_version="ros_listing_status_v3"):
         vendor_master=vendor_master,
     )
 
-    # Three confirmed loan populations are still fetched and
-    # deduplicated using internal loan _id exactly as before.
-    loan_list_records = fetch_all_loan_records()
+    # The three confirmed loan populations were fetched in parallel with
+    # the other bulk masters above and are still deduplicated by the same
+    # fetch_all_loan_records() logic.
 
     # --------------------------------------------------------
     # B. Concurrent detail enrichment
@@ -4370,7 +4380,7 @@ with refresh_col:
         st.rerun()
 
 with st.spinner("Updating Credit master data..."):
-    df = load_credit_data("ros_listing_status_v3")
+    df = load_credit_data("ros_listing_status_v4_fast_engine")
 
 if df.empty:
     st.warning("No credit records were returned by the API.")

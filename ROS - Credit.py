@@ -809,103 +809,87 @@ LOAN_POPULATIONS = OrderedDict([
 # 11. FETCH ONE LOAN POPULATION
 # ============================================================
 
+LOAN_EXTRACTION_WARNINGS = []
+
+
 def fetch_loan_population(source_name, filter_status):
-    """Fetch every available page; never silently accept a repeated/invalid page."""
-    print(f"\n{'=' * 70}\nFETCHING: {source_name}\n{'=' * 70}")
-    all_records = []
-    seen_ids = set()
-    seen_signatures = set()
-    expected_total = None
-    skip = 0
-    page_number = 1
-    # A smaller page avoids proxy truncation and servers that cap response size.
-    page_limit = min(LOAN_PAGE_LIMIT, 100)
+    """Fetch paginated loans with bounded retries and visible completeness warnings.
 
-    while True:
-        if page_number > 10000:
-            raise RuntimeError(f"{source_name}: exceeded pagination safety limit")
-        params = {"filterStatus": filter_status, "limit": page_limit, "skip": skip}
-        payload = api_get(LOAN_URL, params=params,
-                          description=f"{source_name} page {page_number}")
-        if not isinstance(payload, (dict, list)):
-            raise RuntimeError(f"{source_name}: invalid API response at skip={skip}")
-        if isinstance(payload, dict) and (payload.get("success") is False or payload.get("code") not in (None, 200)):
-            raise RuntimeError(f"{source_name}: API rejected page at skip={skip}: {payload.get('message', '')}")
-        # The portal returns totalCount even when only 10 rows were requested.
-        # Use this authoritative value to catch truncated or skipped pages.
-        if isinstance(payload, dict):
-            reported = payload.get("totalCount")
-            if reported is not None:
-                try:
-                    reported = int(reported)
-                except (TypeError, ValueError) as exc:
-                    raise RuntimeError(f"{source_name}: invalid totalCount={reported!r}") from exc
-                if expected_total is None:
-                    expected_total = reported
-                    print(f"{source_name} | API totalCount={expected_total:,}")
-                elif reported != expected_total:
-                    raise RuntimeError(
-                        f"{source_name}: totalCount changed during pagination "
-                        f"({expected_total} -> {reported}). Refresh and retry to avoid gaps."
-                    )
-        batch = find_record_list(payload, expected_keys=["data", "loans", "results", "records", "items"])
-        if not isinstance(batch, list):
-            raise RuntimeError(f"{source_name}: non-list page at skip={skip}")
-        print(f"{source_name} | page={page_number} | skip={skip} | returned={len(batch)}")
-        if not batch:
-            if expected_total is not None and len(seen_ids) != expected_total:
-                raise RuntimeError(
-                    f"{source_name}: INCOMPLETE API EXTRACTION. "
-                    f"Portal/API expects {expected_total:,}, fetched {len(seen_ids):,}. "
-                    "Check server pagination, sorting, or changing records."
-                )
+    The live endpoint is offset-paginated, not snapshot-paginated. Records can
+    change position while a scan is running, so a single pass is not guaranteed
+    to contain every ID. Retry with smaller pages and merge IDs across passes.
+    """
+    import time
+
+    print(f"\nFETCHING {source_name} ({filter_status})")
+    records_by_id = OrderedDict()
+    expected_counts = []
+    problems = []
+
+    for attempt, page_limit in enumerate((100, 50, 10), start=1):
+        skip = 0
+        page = 0
+        page_signatures = set()
+        pass_new = 0
+        while page < 10000:
+            params = {"filterStatus": filter_status, "limit": page_limit, "skip": skip}
+            payload = api_get(LOAN_URL, params=params,
+                              description=f"{source_name} pass {attempt} page {page + 1}")
+            if not isinstance(payload, dict) or payload.get("success") is False:
+                problems.append(f"pass {attempt}, skip {skip}: invalid API response")
+                break
+            total = payload.get("totalCount")
+            try:
+                if total is not None:
+                    expected_counts.append(int(total))
+            except (ValueError, TypeError):
+                problems.append(f"pass {attempt}: invalid totalCount={total!r}")
+            batch = find_record_list(payload,
+                                     expected_keys=["data", "loans", "results", "records", "items"])
+            if not isinstance(batch, list):
+                problems.append(f"pass {attempt}, skip {skip}: missing data list")
+                break
+            if not batch:
+                break
+            ids = tuple(clean_text(r.get("_id")) for r in batch if isinstance(r, dict))
+            if ids in page_signatures:
+                problems.append(f"pass {attempt}, skip {skip}: repeated page")
+                break
+            page_signatures.add(ids)
+            for record in batch:
+                if not isinstance(record, dict):
+                    continue
+                key = clean_text(record.get("_id"))
+                if key and key not in records_by_id:
+                    row = dict(record)
+                    row["_reportSource"] = source_name
+                    records_by_id[key] = row
+                    pass_new += 1
+            skip += len(batch)
+            page += 1
+            # If this scan reached the last offset, do not request a redundant
+            # empty page. This also handles an API that caps page sizes.
+            if expected_counts and skip >= expected_counts[-1]:
+                break
+        print(f"{source_name} pass {attempt}: +{pass_new} unique, "
+              f"total unique={len(records_by_id)}, API counts={set(expected_counts)}")
+        if expected_counts and len(records_by_id) >= max(expected_counts):
             break
+        if attempt < 3:
+            time.sleep(0.4)
 
-        ids = [clean_text(r.get("_id")) for r in batch if isinstance(r, dict)]
-        signature = tuple(ids)
-        if signature in seen_signatures:
-            raise RuntimeError(
-                f"{source_name}: repeated page at skip={skip}; pagination may be ignored. "
-                "Stopping with an ERROR instead of showing incomplete dashboard data."
-            )
-        seen_signatures.add(signature)
-        added = 0
-        for record in batch:
-            if not isinstance(record, dict):
-                raise RuntimeError(f"{source_name}: unexpected non-object loan at skip={skip}")
-            internal_id = clean_text(record.get("_id"))
-            if not internal_id:
-                raise RuntimeError(f"{source_name}: loan missing _id at skip={skip}")
-            if internal_id in seen_ids:
-                continue
-            seen_ids.add(internal_id)
-            record_copy = dict(record)
-            record_copy["_reportSource"] = source_name
-            all_records.append(record_copy)
-            added += 1
-        # A page may overlap previous pages. Continue instead of assuming end.
-        if added == 0:
-            print(f"WARNING: {source_name} page {page_number} had no new IDs; checking next page")
-        skip += len(batch)
-        if expected_total is not None and len(seen_ids) == expected_total:
-            break
-        if expected_total is not None and skip > expected_total + page_limit * 3:
-            raise RuntimeError(
-                f"{source_name}: exceeded expected pagination range. "
-                f"Fetched {len(seen_ids):,} of {expected_total:,} unique loans."
-            )
-        page_number += 1
-        # Do NOT stop merely because returned rows are fewer than requested.
-        # Only an empty page confirms end with this API contract.
-
-    if expected_total is not None and len(all_records) != expected_total:
-        raise RuntimeError(
-            f"{source_name}: expected {expected_total:,} loans from API totalCount, "
-            f"but retrieved {len(all_records):,}. Dashboard will not display incomplete data."
-        )
-    print(f"{source_name}: {len(all_records):,} unique records fetched "
-          f"(API totalCount={expected_total})")
-    return all_records
+    observed = max(expected_counts) if expected_counts else None
+    if observed is None or len(records_by_id) != observed or problems:
+        note = (f"{source_name}: fetched {len(records_by_id):,} unique loans; "
+                f"API reported {observed if observed is not None else 'unknown'}. "
+                f"API counts observed: {sorted(set(expected_counts))}. "
+                f"Pagination warnings: {'; '.join(problems[:3]) or 'none'}. "
+                "Data may be incomplete or changing; do not treat totals as reconciled.")
+        print("EXTRACTION WARNING: " + note)
+        LOAN_EXTRACTION_WARNINGS.append(note)
+    else:
+        print(f"RECONCILIATION {source_name}: {len(records_by_id):,}/{observed:,} unique loans")
+    return list(records_by_id.values())
 
 
 # ============================================================
@@ -3678,6 +3662,7 @@ def load_credit_data(extraction_version="ros_listing_status_v6_totalcount_reconc
 
     loan_detail_cache = {}
     lead_detail_cache = {}
+    LOAN_EXTRACTION_WARNINGS.clear()
 
     # --------------------------------------------------------
     # A. Bulk master endpoints — PARALLEL COLD-START ENGINE
@@ -3696,6 +3681,9 @@ def load_credit_data(extraction_version="ros_listing_status_v6_totalcount_reconc
         vendor_users = _bulk_futures["vendor"].result()
         crm_leads = _bulk_futures["leads"].result()
         loan_list_records = _bulk_futures["loans"].result()
+
+    for _loan_warning in LOAN_EXTRACTION_WARNINGS:
+        st.warning("Loan extraction: " + _loan_warning)
 
     cp_master = create_partner_master(
         cp_users,

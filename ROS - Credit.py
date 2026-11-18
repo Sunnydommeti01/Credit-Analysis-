@@ -815,7 +815,7 @@ LOAN_EXTRACTION_WARNINGS = []
 def fetch_loan_population(source_name, filter_status):
     """Raw-first API extraction. Never infer records from totalCount.
 
-    Fetches small pages at sequential offsets, preserves the exact API rows,
+    Fetches small pages at sequential page numbers, preserves the exact API rows,
     and logs every page's requested offset, returned length and new IDs.
     A second pass checks for records that moved while the scan was running.
     """
@@ -836,7 +836,7 @@ def fetch_loan_population(source_name, filter_status):
             params = {"filterStatus": filter_status, "limit": page_limit, "skip": skip}
             payload = api_get(
                 LOAN_URL, params=params,
-                description=f"Raw {source_name} pass {pass_no} offset {skip}",
+                description=f"Raw {source_name} pass {pass_no} page {skip}",
             )
             if not isinstance(payload, dict) or payload.get("success") is False:
                 diagnostics.append(f"pass={pass_no} skip={skip}: invalid response")
@@ -888,9 +888,9 @@ def fetch_loan_population(source_name, filter_status):
                     break
                 seen_signatures.add(signature)
 
-            # Advance by the requested offset width. Never use totalCount as
-            # the loop terminator: it is metadata, not downloaded records.
-            skip += page_limit
+            # The Rengy portal uses skip as a ZERO-BASED PAGE INDEX, not row offset.
+            # Browser verified: page 1 skip=0, page 2 skip=1, page 3 skip=2.
+            skip += 1
 
             # A full last page may be followed by an empty page.
             # If API returns a short page, check the next offset before stopping.
@@ -4404,7 +4404,7 @@ with refresh_col:
         st.rerun()
 
 with st.spinner("Updating Credit master data..."):
-    df = load_credit_data("ros_raw_first_small_pages_v1")
+    df = load_credit_data("ros_page_index_verified_v2")
 
 if df.empty:
     st.warning("No credit records were returned by the API.")

@@ -809,140 +809,65 @@ LOAN_POPULATIONS = OrderedDict([
 # 11. FETCH ONE LOAN POPULATION
 # ============================================================
 
-def fetch_loan_population(
-    source_name,
-    filter_status
-):
-
-    print("\n" + "=" * 70)
-    print(f"FETCHING: {source_name}")
-    print("=" * 70)
-
+def fetch_loan_population(source_name, filter_status):
+    """Fetch every available page; never silently accept a repeated/invalid page."""
+    print(f"\n{'=' * 70}\nFETCHING: {source_name}\n{'=' * 70}")
     all_records = []
-
     seen_ids = set()
-
-    previous_page_ids = None
-
+    seen_signatures = set()
     skip = 0
     page_number = 1
+    # A smaller page avoids proxy truncation and servers that cap response size.
+    page_limit = min(LOAN_PAGE_LIMIT, 100)
 
     while True:
-
-        params = {
-            "filterStatus": filter_status,
-            "limit": LOAN_PAGE_LIMIT,
-            "skip": skip
-        }
-
-        payload = api_get(
-            LOAN_URL,
-            params=params,
-            description=(
-                f"{source_name} "
-                f"page {page_number}"
-            )
-        )
-
-        batch = find_record_list(
-            payload,
-            expected_keys=[
-                "data",
-                "loans",
-                "results",
-                "records",
-                "items"
-            ]
-        )
-
-        print(
-            f"{source_name} | "
-            f"page={page_number} | "
-            f"skip={skip} | "
-            f"returned={len(batch)}"
-        )
-
+        if page_number > 10000:
+            raise RuntimeError(f"{source_name}: exceeded pagination safety limit")
+        params = {"filterStatus": filter_status, "limit": page_limit, "skip": skip}
+        payload = api_get(LOAN_URL, params=params,
+                          description=f"{source_name} page {page_number}")
+        if not isinstance(payload, (dict, list)):
+            raise RuntimeError(f"{source_name}: invalid API response at skip={skip}")
+        if isinstance(payload, dict) and (payload.get("success") is False or payload.get("code") not in (None, 200)):
+            raise RuntimeError(f"{source_name}: API rejected page at skip={skip}: {payload.get('message', '')}")
+        batch = find_record_list(payload, expected_keys=["data", "loans", "results", "records", "items"])
+        if not isinstance(batch, list):
+            raise RuntimeError(f"{source_name}: non-list page at skip={skip}")
+        print(f"{source_name} | page={page_number} | skip={skip} | returned={len(batch)}")
         if not batch:
             break
 
-        current_page_ids = []
-
-        new_records = 0
-
+        ids = [clean_text(r.get("_id")) for r in batch if isinstance(r, dict)]
+        signature = tuple(ids)
+        if signature in seen_signatures:
+            raise RuntimeError(
+                f"{source_name}: repeated page at skip={skip}; pagination may be ignored. "
+                "Stopping with an ERROR instead of showing incomplete dashboard data."
+            )
+        seen_signatures.add(signature)
+        added = 0
         for record in batch:
-
             if not isinstance(record, dict):
+                raise RuntimeError(f"{source_name}: unexpected non-object loan at skip={skip}")
+            internal_id = clean_text(record.get("_id"))
+            if not internal_id:
+                raise RuntimeError(f"{source_name}: loan missing _id at skip={skip}")
+            if internal_id in seen_ids:
                 continue
-
-            internal_id = clean_text(
-                record.get("_id")
-            )
-
-            if internal_id:
-
-                current_page_ids.append(
-                    internal_id
-                )
-
-                if internal_id in seen_ids:
-                    continue
-
-                seen_ids.add(
-                    internal_id
-                )
-
+            seen_ids.add(internal_id)
             record_copy = dict(record)
-
-            record_copy[
-                "_reportSource"
-            ] = source_name
-
-            all_records.append(
-                record_copy
-            )
-
-            new_records += 1
-
-        page_signature = tuple(
-            current_page_ids
-        )
-
-        if (
-            previous_page_ids is not None
-            and page_signature
-            and page_signature == previous_page_ids
-        ):
-
-            print(
-                "Repeated API page detected. "
-                "Stopping safely."
-            )
-
-            break
-
-        previous_page_ids = page_signature
-
-        if new_records == 0:
-
-            print(
-                "No new loan IDs found. "
-                "Stopping safely."
-            )
-
-            break
-
-        # IMPORTANT:
-        # Move skip by actual rows returned.
+            record_copy["_reportSource"] = source_name
+            all_records.append(record_copy)
+            added += 1
+        # A page may overlap previous pages. Continue instead of assuming end.
+        if added == 0:
+            print(f"WARNING: {source_name} page {page_number} had no new IDs; checking next page")
         skip += len(batch)
-
         page_number += 1
+        # Do NOT stop merely because returned rows are fewer than requested.
+        # Only an empty page confirms end with this API contract.
 
-    print(
-        f"{source_name}: "
-        f"{len(all_records):,} "
-        f"unique records fetched"
-    )
-
+    print(f"{source_name}: {len(all_records):,} unique records fetched")
     return all_records
 
 
@@ -1003,6 +928,9 @@ def fetch_all_loan_records():
                 else []
             )
 
+            if source == "Rejected Loan":
+                combined[internal_id]["_rejectedLoanRecord"] = dict(record)
+
             # Keep the exact row returned by the Loan Status population.
             # This is the same population that powers the CRM Loan Status
             # table where "Disbursed At" is displayed.
@@ -1030,6 +958,14 @@ def fetch_all_loan_records():
                 ][
                     "_reportSources"
                 ].append(source)
+
+            # Preserve the rejected-list row for status and rejection evidence.
+            if source == "Rejected Loan":
+                combined[internal_id]["_rejectedLoanRecord"] = dict(record)
+                # Retain latest rejected listing fields for a fallback if detail fails.
+                for key, value in record.items():
+                    if key not in {"_reportSource", "_reportSources", "_loanStatusRecord", "_rejectedLoanRecord"}:
+                        combined[internal_id][key] = value
 
             # A loan can occur in more than one population. Do not lose
             # the Loan Status row just because Loan Request was seen first.
@@ -2961,7 +2897,9 @@ def build_report_row(
     # When the same loan appears in multiple report populations,
     # prefer the exact Loan Status population row retained during
     # deduplication. Otherwise use the listing row itself.
-    ros_status_record = list_record.get("_loanStatusRecord")
+    ros_status_record = list_record.get("_rejectedLoanRecord")
+    if not isinstance(ros_status_record, dict):
+        ros_status_record = list_record.get("_loanStatusRecord")
     if not isinstance(ros_status_record, dict):
         ros_status_record = list_record
 
@@ -3633,25 +3571,26 @@ def build_credit_master_optimized(
             {},
         )
 
-        if loan_data:
-            try:
-                report_rows.append(
-                    build_report_row(
-                        list_record=list_record,
-                        loan_data=loan_data,
-                        partner_by_lead_code=partner_by_lead_code,
-                        partner_by_internal_lead_id=partner_by_internal_lead_id,
-                    )
-                )
-            except Exception as exc:
-                # Do not silently hide rows: this can materially undercount
-                # monthly logins/disbursements.
-                st.session_state.setdefault(
-                    "_credit_row_build_errors",
-                    []
-                ).append(
-                    f"{internal_loan_id}: {type(exc).__name__}"
-                )
+        # The listing API already contains valid loan data. Do not discard
+        # the loan merely because the separate detail endpoint failed.
+        used_listing_fallback = not bool(loan_data)
+        if used_listing_fallback:
+            loan_data = dict(list_record)
+            st.session_state.setdefault("_credit_detail_fallback_ids", []).append(internal_loan_id)
+        try:
+            built_row = build_report_row(
+                list_record=list_record,
+                loan_data=loan_data,
+                partner_by_lead_code=partner_by_lead_code,
+                partner_by_internal_lead_id=partner_by_internal_lead_id,
+            )
+            built_row["Extraction Source"] = ("Listing fallback" if used_listing_fallback else "Loan detail")
+            built_row["Internal Loan ID"] = internal_loan_id
+            report_rows.append(built_row)
+        except Exception as exc:
+            st.session_state.setdefault("_credit_row_build_errors", []).append(
+                f"{internal_loan_id}: {type(exc).__name__}: {str(exc)[:160]}"
+            )
 
         if (
             index == 1
@@ -3664,19 +3603,25 @@ def build_credit_master_optimized(
             )
 
     progress.empty()
-
+    if len(report_rows) != len(loan_list_records):
+        missing = len(loan_list_records) - len(report_rows)
+        raise RuntimeError(
+            f"Credit master is incomplete: {missing} of {len(loan_list_records)} "
+            "fetched loans could not be converted to dashboard rows. "
+            "Check _credit_row_build_errors. Refusing to show a partial dataset."
+        )
     return pd.DataFrame(report_rows)
 
 
 # 32. STREAMLIT DATA LOAD
 # ============================================================
 
-@st.cache_resource(ttl=21600, show_spinner=False)
-def load_credit_data(extraction_version="ros_listing_status_v4_fast_engine"):
+@st.cache_resource(ttl=900, show_spinner=False)
+def load_credit_data(extraction_version="ros_listing_status_v5_complete_extraction"):
     """
     ONE master load for ALL months.
 
-    Cache duration: 6 hours in memory (zero dataframe serialization on reruns).
+    Cache duration: 15 minutes in memory (zero dataframe serialization on reruns).
     Month / region / provider / status / consultant filters operate
     only on the returned dataframe and do not call the API again.
     """
@@ -4380,7 +4325,7 @@ with refresh_col:
         st.rerun()
 
 with st.spinner("Updating Credit master data..."):
-    df = load_credit_data("ros_listing_status_v4_fast_engine")
+    df = load_credit_data("ros_listing_status_v5_complete_extraction")
 
 if df.empty:
     st.warning("No credit records were returned by the API.")

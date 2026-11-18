@@ -813,82 +813,111 @@ LOAN_EXTRACTION_WARNINGS = []
 
 
 def fetch_loan_population(source_name, filter_status):
-    """Fetch paginated loans with bounded retries and visible completeness warnings.
+    """Raw-first API extraction. Never infer records from totalCount.
 
-    The live endpoint is offset-paginated, not snapshot-paginated. Records can
-    change position while a scan is running, so a single pass is not guaranteed
-    to contain every ID. Retry with smaller pages and merge IDs across passes.
+    Fetches small pages at sequential offsets, preserves the exact API rows,
+    and logs every page's requested offset, returned length and new IDs.
+    A second pass checks for records that moved while the scan was running.
     """
     import time
 
-    print(f"\nFETCHING {source_name} ({filter_status})")
+    print(f"\\nRAW EXTRACTION START | {source_name} | {filter_status}")
     records_by_id = OrderedDict()
-    expected_counts = []
-    problems = []
+    observed_counts = []
+    diagnostics = []
+    # Use the page size confirmed by the browser requests.
+    page_limit = 10
 
-    for attempt, page_limit in enumerate((100, 50, 10), start=1):
+    for pass_no in (1, 2):
         skip = 0
-        page = 0
-        page_signatures = set()
-        pass_new = 0
-        while page < 10000:
+        seen_signatures = set()
+        empty_pages = 0
+        for page_no in range(1, 1001):
             params = {"filterStatus": filter_status, "limit": page_limit, "skip": skip}
-            payload = api_get(LOAN_URL, params=params,
-                              description=f"{source_name} pass {attempt} page {page + 1}")
+            payload = api_get(
+                LOAN_URL, params=params,
+                description=f"Raw {source_name} pass {pass_no} offset {skip}",
+            )
             if not isinstance(payload, dict) or payload.get("success") is False:
-                problems.append(f"pass {attempt}, skip {skip}: invalid API response")
+                diagnostics.append(f"pass={pass_no} skip={skip}: invalid response")
                 break
             total = payload.get("totalCount")
             try:
                 if total is not None:
-                    expected_counts.append(int(total))
-            except (ValueError, TypeError):
-                problems.append(f"pass {attempt}: invalid totalCount={total!r}")
-            batch = find_record_list(payload,
-                                     expected_keys=["data", "loans", "results", "records", "items"])
+                    observed_counts.append(int(total))
+            except (TypeError, ValueError):
+                diagnostics.append(f"pass={pass_no} skip={skip}: invalid totalCount")
+            batch = payload.get("data")
             if not isinstance(batch, list):
-                problems.append(f"pass {attempt}, skip {skip}: missing data list")
+                diagnostics.append(f"pass={pass_no} skip={skip}: data is not a list")
                 break
-            if not batch:
-                break
-            ids = tuple(clean_text(r.get("_id")) for r in batch if isinstance(r, dict))
-            if ids in page_signatures:
-                problems.append(f"pass {attempt}, skip {skip}: repeated page")
-                break
-            page_signatures.add(ids)
+            new_ids = 0
+            ids = []
             for record in batch:
                 if not isinstance(record, dict):
                     continue
                 key = clean_text(record.get("_id"))
-                if key and key not in records_by_id:
+                if not key:
+                    diagnostics.append(f"pass={pass_no} skip={skip}: row without _id")
+                    continue
+                ids.append(key)
+                if key not in records_by_id:
                     row = dict(record)
                     row["_reportSource"] = source_name
                     records_by_id[key] = row
-                    pass_new += 1
-            skip += len(batch)
-            page += 1
-            # If this scan reached the last offset, do not request a redundant
-            # empty page. This also handles an API that caps page sizes.
-            if expected_counts and skip >= expected_counts[-1]:
-                break
-        print(f"{source_name} pass {attempt}: +{pass_new} unique, "
-              f"total unique={len(records_by_id)}, API counts={set(expected_counts)}")
-        if expected_counts and len(records_by_id) >= max(expected_counts):
-            break
-        if attempt < 3:
-            time.sleep(0.4)
+                    new_ids += 1
 
-    observed = max(expected_counts) if expected_counts else None
-    if observed is None or len(records_by_id) != observed or problems:
-        note = (f"{source_name}: fetched {len(records_by_id):,} unique loans; "
-                f"API reported {observed if observed is not None else 'unknown'}. "
-                f"API counts observed: {sorted(set(expected_counts))}. "
-                f"Pagination warnings: {'; '.join(problems[:3]) or 'none'}. "
-                "Data may be incomplete or changing; do not treat totals as reconciled.")
-        print("EXTRACTION WARNING: " + note)
-        LOAN_EXTRACTION_WARNINGS.append(note)
-    else:
-        print(f"RECONCILIATION {source_name}: {len(records_by_id):,}/{observed:,} unique loans")
+            print(
+                f"RAW PAGE | {source_name} | pass={pass_no} | "
+                f"skip={skip} | requested={page_limit} | "
+                f"returned={len(batch)} | new={new_ids} | "
+                f"unique={len(records_by_id)} | totalCount={total}"
+            )
+            if not batch:
+                empty_pages += 1
+                if empty_pages >= 2:
+                    break
+            else:
+                empty_pages = 0
+                signature = tuple(ids)
+                if signature in seen_signatures:
+                    diagnostics.append(
+                        f"pass={pass_no} skip={skip}: repeated page IDs; "
+                        "API may ignore skip"
+                    )
+                    break
+                seen_signatures.add(signature)
+
+            # Advance by the requested offset width. Never use totalCount as
+            # the loop terminator: it is metadata, not downloaded records.
+            skip += page_limit
+
+            # A full last page may be followed by an empty page.
+            # If API returns a short page, check the next offset before stopping.
+            if len(batch) < page_limit:
+                empty_pages += 1
+                if empty_pages >= 2:
+                    break
+        else:
+            diagnostics.append(f"pass={pass_no}: safety page limit reached")
+        if pass_no == 1:
+            time.sleep(0.25)
+
+    observed = max(observed_counts) if observed_counts else None
+    count_label = str(observed) if observed is not None else "not supplied"
+    print(
+        f"RAW EXTRACTION RESULT | {source_name} | "
+        f"actual_unique={len(records_by_id)} | reported_total={count_label}"
+    )
+    if observed is not None and len(records_by_id) != observed:
+        diagnostics.append(
+            f"actual unique {len(records_by_id)} differs from API totalCount {observed}"
+        )
+    if diagnostics:
+        warning = f"{source_name}: " + "; ".join(diagnostics[:6])
+        LOAN_EXTRACTION_WARNINGS.append(warning)
+        print("RAW EXTRACTION WARNING | " + warning)
+
     return list(records_by_id.values())
 
 
@@ -4375,7 +4404,7 @@ with refresh_col:
         st.rerun()
 
 with st.spinner("Updating Credit master data..."):
-    df = load_credit_data("ros_listing_status_v5_complete_extraction")
+    df = load_credit_data("ros_raw_first_small_pages_v1")
 
 if df.empty:
     st.warning("No credit records were returned by the API.")

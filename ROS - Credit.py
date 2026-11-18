@@ -4383,7 +4383,7 @@ with refresh_col:
         st.rerun()
 
 with st.spinner("Updating Credit master data..."):
-    df = load_credit_data("ros_page_index_verified_v2")
+    df = load_credit_data("ros_targeted_missing_audit_v1")
 
 # PORTAL-SYNC AUDIT: raw loan populations before any month, region,
 # current-status or lead-level grouping. Do not add the population counts
@@ -4406,6 +4406,95 @@ if not df.empty and "Internal Loan ID" in df.columns:
         _audit_cols = [c for c in ("Internal Loan ID", "LEAD ID", "Bank/NBFC", "Current Status", "Loan Sub Stage", "API Loan Status", "API Rejected Loan", "API Loan Request", "Extraction Source") if c in df.columns]
         st.dataframe(df[_audit_cols], use_container_width=True, hide_index=True)
         st.download_button("Download loan-level audit CSV", df[_audit_cols].to_csv(index=False).encode("utf-8-sig"), "rengy_loan_level_audit.csv", "text/csv", key="loan_audit_download")
+
+
+# HISTORY RECONCILIATION: a loan ID can represent several sequential lender
+# attempts. Do not equate a unique loan-ID count with a lender-attempt count.
+# This table is deliberately built from reconstructed attempt columns, not
+# by duplicating master loan rows (which would inflate application counts).
+if not df.empty and "LEAD ID" in df.columns:
+    with st.expander("Loan history reconciliation — lender attempts", expanded=False):
+        st.caption(
+            "One loan ID may change lender repeatedly. Historical rejected "
+            "attempts are counted separately from current loan records. "
+            "History reconstruction requires auditLogs in /api/loan/{id}; "
+            "a listing-only fallback cannot reconstruct earlier lenders."
+        )
+        _history_rows = []
+        _history_suffixes = ["1st", "2nd", "3rd", "4th", "5th"]
+        for _idx, _r in df.iterrows():
+            _loan_id = str(_r.get("Internal Loan ID", "") or "")
+            _lead_id = str(_r.get("LEAD ID", "") or "")
+            _current_lender = str(_r.get("Bank/NBFC", "") or "")
+            _seen = 0
+            for _sfx in _history_suffixes:
+                _provider = str(_r.get(f"{_sfx} Provider", "") or "").strip()
+                if not _provider or _provider.casefold() in ("nan", "none"):
+                    continue
+                _seen += 1
+                _history_rows.append({
+                    "Internal Loan ID": _loan_id,
+                    "LEAD ID": _lead_id,
+                    "Attempt": _seen,
+                    "Lender": _provider,
+                    "Historical Stage": str(_r.get(f"{_sfx} Stage", "") or ""),
+                    "Historical Substage": str(_r.get(f"{_sfx} Substage", "") or ""),
+                    "Attempt Date": str(_r.get(f"{_sfx} Date", "") or ""),
+                    "Current Lender": _current_lender,
+                    "Current Status": str(_r.get("Current Status", "") or ""),
+                    "Extraction Source": str(_r.get("Extraction Source", "") or ""),
+                })
+            if _seen == 0:
+                _history_rows.append({
+                    "Internal Loan ID": _loan_id,
+                    "LEAD ID": _lead_id,
+                    "Attempt": 1,
+                    "Lender": _current_lender,
+                    "Historical Stage": "Not reconstructed — current record only",
+                    "Historical Substage": "",
+                    "Attempt Date": "",
+                    "Current Lender": _current_lender,
+                    "Current Status": str(_r.get("Current Status", "") or ""),
+                    "Extraction Source": str(_r.get("Extraction Source", "") or ""),
+                })
+        _history_df = pd.DataFrame(_history_rows)
+        _h1, _h2 = st.columns(2)
+        _h1.metric("Unique master loan IDs", f"{_audit_master:,}")
+        _h2.metric("Reconstructed / fallback attempt rows", f"{len(_history_df):,}")
+        _focus = st.text_input(
+            "Inspect a lead or loan (e.g. LEAD4220 or LOAN2068)",
+            value="LEAD4220", key="credit_history_focus_v1"
+        ).strip()
+        _shown_history = _history_df
+        if _focus:
+            _matched = _history_df["LEAD ID"].astype(str).str.casefold().eq(_focus.casefold())
+            # Internal IDs are Mongo IDs; loan reference numbers may not be
+            # available in this audit table. Lead lookup remains reliable.
+            _matched |= _history_df["Internal Loan ID"].astype(str).str.casefold().eq(_focus.casefold())
+            _shown_history = _history_df.loc[_matched]
+        if _shown_history.empty:
+            st.info("No matching master loan/lead found. Clear the search to see all attempts.")
+        else:
+            st.dataframe(_shown_history, use_container_width=True, hide_index=True)
+        st.download_button(
+            "Download all reconstructed lender attempts CSV",
+            _history_df.to_csv(index=False).encode("utf-8-sig"),
+            "rengy_lender_attempt_history_audit.csv", "text/csv",
+            key="credit_history_audit_download_v1"
+        )
+        _focus_4220 = _history_df.loc[_history_df["LEAD ID"].astype(str).eq("LEAD4220")]
+        if not _focus_4220.empty:
+            _providers_4220 = {str(x).strip().casefold() for x in _focus_4220["Lender"]}
+            _expected_4220 = {"fibe", "solfin", "ecofy"}
+            if not all(any(e in p for p in _providers_4220) for e in _expected_4220):
+                st.warning(
+                    "LEAD4220 history is incomplete: the portal shows Ecofy -> "
+                    "Solfin -> FIBE, but not all three are reconstructed. "
+                    "Check whether the loan-detail API response includes auditLogs "
+                    "and whether provider changes are present in those logs."
+                )
+            else:
+                st.success("LEAD4220 lender sequence includes Ecofy, Solfin and FIBE.")
 
 
 if df.empty:
@@ -4774,6 +4863,81 @@ if "Internal Loan ID" in kpi_cases.columns:
     _valid = kpi_cases.loc[_loan_ids.ne("")].drop_duplicates("Internal Loan ID", keep="first")
     _blank = kpi_cases.loc[_loan_ids.eq("")]
     kpi_cases = pd.concat([_valid, _blank], axis=0).sort_index()
+
+# TARGETED MISSING-LOAN AUDIT: compare reported lead/lender pairs at each stage.
+# This is an audit only; it never changes the loan master or KPI calculations.
+_MISSING_CASE_TARGETS = {
+    "LEAD4220": ["FIBE", "SOLFIN", "ECOFY"],
+    "LEAD1497": ["ECOFY"], "LEAD1463": ["NPS"],
+    "LEAD1457": ["NPS"], "LEAD1446": ["FIBE"],
+    "LEAD1339": ["ECOFY"], "LEAD1373": ["FIBE"],
+    "LEAD1299": ["NPS"], "LEAD1281": ["NPS"],
+    "LEAD1218": ["NPS"], "LEAD1225": ["NPS"],
+    "LEAD1150": ["NPS"], "LEAD1141": ["NPS"],
+    "LEAD1001": ["NPS"], "LEAD1020": ["NPS"],
+    "LEAD973": ["NPS"], "LEAD1004": ["NPS"],
+    "LEAD1038": ["BAJAJ"], "LEAD1007": ["NPS"],
+    "LEAD957": ["NPS"], "LEAD945": ["NPS"],
+    "LEAD917": ["ECOFY"], "LEAD900": ["NPS"],
+    "LEAD853": ["NPS"], "LEAD835": ["ECOFY"],
+    "LEAD710": ["NPS"], "LEAD262": ["NPS"],
+    "LEAD601": ["NPS"],
+}
+
+def _audit_match(frame, lead, lender):
+    if frame is None or frame.empty or not all(c in frame.columns for c in ("LEAD ID", "Bank/NBFC")):
+        return pd.DataFrame()
+    lead_mask = frame["LEAD ID"].fillna("").astype(str).str.strip().str.upper().eq(lead)
+    bank = frame["Bank/NBFC"].fillna("").astype(str).str.upper()
+    if lender == "SOLFIN":
+        bank_mask = bank.str.contains("SOLFIN", regex=False)
+    elif lender == "ECOFY":
+        bank_mask = bank.str.contains("ECOFY", regex=False)
+    elif lender == "BAJAJ":
+        bank_mask = bank.str.contains("BAJAJ", regex=False)
+    elif lender == "NPS":
+        bank_mask = bank.str.contains("NPS", regex=False) | bank.str.contains("NATIONAL PORTAL", regex=False)
+    else:
+        bank_mask = bank.str.contains(lender, regex=False)
+    return frame.loc[lead_mask & bank_mask]
+
+_audit_missing_rows = []
+for _lead, _lenders in _MISSING_CASE_TARGETS.items():
+    for _lender in _lenders:
+        _in_master = _audit_match(df, _lead, _lender)
+        _in_filtered = _audit_match(filtered, _lead, _lender)
+        _in_kpi = _audit_match(kpi_cases, _lead, _lender)
+        if _in_master.empty:
+            _where = "NOT IN MASTER — check API extraction, lender naming, or row conversion"
+        elif _in_filtered.empty:
+            _where = "REMOVED BY DASHBOARD FILTERS"
+        elif _in_kpi.empty:
+            _where = "EXCLUDED BY KPI REPORTING DATE RULES"
+        else:
+            _where = "PRESENT IN KPI — check downstream table/grouping"
+        _first = _in_master.iloc[0] if not _in_master.empty else None
+        _audit_missing_rows.append({
+            "Lead": _lead, "Expected lender": _lender,
+            "Master rows": len(_in_master), "Filtered rows": len(_in_filtered),
+            "KPI rows": len(_in_kpi), "Where": _where,
+            "Actual lender": str(_first.get("Bank/NBFC", "")) if _first is not None else "",
+            "Current status": str(_first.get("Current Status", "")) if _first is not None else "",
+            "Sub stage": str(_first.get("Loan Sub Stage", "")) if _first is not None else "",
+            "Internal loan ID": str(_first.get("Internal Loan ID", "")) if _first is not None else "",
+            "Login Done On": str(_first.get("Login Done On", "")) if _first is not None else "",
+            "API Loan Status": bool(_first.get("API Loan Status", False)) if _first is not None else False,
+            "API Rejected Loan": bool(_first.get("API Rejected Loan", False)) if _first is not None else False,
+        })
+_audit_missing_df = pd.DataFrame(_audit_missing_rows)
+with st.expander("Missing loan investigation — 30 reported lender applications", expanded=True):
+    st.caption("Matches each reported lead and lender against the raw master, selected filters, and KPI dataset. Does not change calculations.")
+    st.dataframe(_audit_missing_df, hide_index=True, use_container_width=True)
+    st.download_button(
+        "Download missing-loan investigation CSV",
+        _audit_missing_df.to_csv(index=False).encode("utf-8-sig"),
+        file_name="rengy_missing_loan_investigation.csv", mime="text/csv",
+        key="missing_loan_investigation_download",
+    )
 
 _kpi_status = clean_series(kpi_cases["Current Status"]).str.casefold()
 

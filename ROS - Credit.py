@@ -3165,9 +3165,9 @@ def build_report_row(
         5: "5th"
     }
 
-    # Keep at least five groups.
+    # Keep at least six groups, matching the requested master export.
     output_attempt_count = max(
-        5,
+        6,
         len(attempts)
     )
 
@@ -4408,6 +4408,70 @@ if not df.empty and "Internal Loan ID" in df.columns:
         st.download_button("Download loan-level audit CSV", df[_audit_cols].to_csv(index=False).encode("utf-8-sig"), "rengy_loan_level_audit.csv", "text/csv", key="loan_audit_download")
 
 
+# FULL MASTER EXPORT: preserve every requested field, including six lender
+# attempts. Missing fields are blank, never guessed or fabricated.
+# The export uses the UNFILTERED master so month/status selections do not
+# silently remove records. One row represents one unique internal loan ID.
+if not df.empty:
+    _base_export_columns = [
+        "LEAD ID", "Lead Name", "Vendor/Channel Partner Name",
+        "Consultant Name", "Region", "Lead District", "Requested Date",
+        "Project Value", "Bank/NBFC", "Credit Officer", "Fintech ID",
+        "Bank Name", "IFSC Code", "Branch", "Approved Amount",
+        "Disbursed Amount", "Loan Pending Amount", "Login Done On",
+        "Disbursed At", "Current Status", "Loan Sub Stage",
+        "Login Attempts", "Comments", "Dynamic Pricing", "Source",
+    ]
+    _attempt_export_columns = [
+        f"{suffix} {field}"
+        for suffix in ("1st", "2nd", "3rd", "4th", "5th")
+        for field in ("Date", "Provider", "Stage", "Substage", "Remark")
+    ]
+    _extra_export_columns = [
+        "Partner Region", "Status Event Date", "Subvention Amount",
+        "Subvention Paid By", "Additional Charges", "Add Charges Paid By",
+        "ROI", "PF", "Tenure", "Advance EMI Count",
+        "Advance EMI Amount", "EMI Amount", "EMI Paid By",
+        "Total Advance EMI", "Customer Paying EMI", "Extraction Source",
+        "Internal Loan ID", "API Loan Request", "API Loan Status",
+        "API Rejected Loan", "API Populations",
+    ]
+    _sixth_export_columns = [
+        f"6th {field}"
+        for field in ("Date", "Provider", "Stage", "Substage", "Remark")
+    ]
+    _requested_export_columns = (
+        _base_export_columns + _attempt_export_columns
+        + _extra_export_columns + _sixth_export_columns
+    )
+    _master_export = df.reindex(columns=_requested_export_columns).copy()
+    # Keep historical attempts beyond the sixth when they exist.
+    _extra_attempt_cols = [
+        c for c in df.columns
+        if c not in _requested_export_columns
+        and re.match(r"^(?:[7-9]th|[1-9][0-9]+th) (?:Date|Provider|Stage|Substage|Remark)$", str(c))
+    ]
+    if _extra_attempt_cols:
+        _master_export = pd.concat(
+            [_master_export, df[_extra_attempt_cols]], axis=1
+        )
+    with st.expander("Full credit master — all requested columns", expanded=False):
+        st.caption(
+            "Unfiltered master, one row per internal loan record. "
+            "Historical lender columns require audit logs; unavailable "
+            "history is left blank rather than invented. Rejected lender "
+            "attempts may share the same Loan ID."
+        )
+        st.metric("Master rows", f"{len(_master_export):,}")
+        st.dataframe(_master_export, use_container_width=True, hide_index=True)
+        st.download_button(
+            "Download complete master CSV (all requested columns)",
+            data=_master_export.to_csv(index=False).encode("utf-8-sig"),
+            file_name="RENGY_Credit_Full_Master_All_Columns.csv",
+            mime="text/csv", key="full_master_requested_columns_v1",
+        )
+
+
 # HISTORY RECONCILIATION: a loan ID can represent several sequential lender
 # attempts. Do not equate a unique loan-ID count with a lender-attempt count.
 # This table is deliberately built from reconstructed attempt columns, not
@@ -4421,7 +4485,7 @@ if not df.empty and "LEAD ID" in df.columns:
             "a listing-only fallback cannot reconstruct earlier lenders."
         )
         _history_rows = []
-        _history_suffixes = ["1st", "2nd", "3rd", "4th", "5th"]
+        _history_suffixes = ["1st", "2nd", "3rd", "4th", "5th", "6th"]
         for _idx, _r in df.iterrows():
             _loan_id = str(_r.get("Internal Loan ID", "") or "")
             _lead_id = str(_r.get("LEAD ID", "") or "")

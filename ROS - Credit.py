@@ -3657,7 +3657,7 @@ def build_credit_master_optimized(
 # ============================================================
 
 @st.cache_resource(ttl=900, show_spinner=False)
-def load_credit_data(extraction_version="ros_listing_status_v6_totalcount_reconciled"):
+def load_credit_data(extraction_version="ros_portal_sync_loan_level_v7"):
     """
     ONE master load for ALL months.
 
@@ -4385,6 +4385,29 @@ with refresh_col:
 with st.spinner("Updating Credit master data..."):
     df = load_credit_data("ros_page_index_verified_v2")
 
+# PORTAL-SYNC AUDIT: raw loan populations before any month, region,
+# current-status or lead-level grouping. Do not add the population counts
+# and assume they are unique: a loan ID may occur in multiple API tabs.
+if not df.empty and "Internal Loan ID" in df.columns:
+    _audit_ids = df["Internal Loan ID"].fillna("").astype(str).str.strip()
+    _audit_master = int(_audit_ids[_audit_ids.ne("")].nunique())
+    _audit_status = int(df["API Loan Status"].fillna(False).sum()) if "API Loan Status" in df else 0
+    _audit_rejected = int(df["API Rejected Loan"].fillna(False).sum()) if "API Rejected Loan" in df else 0
+    _audit_requests = int(df["API Loan Request"].fillna(False).sum()) if "API Loan Request" in df else 0
+    _audit_overlap = int((df["API Loan Status"].fillna(False) & df["API Rejected Loan"].fillna(False)).sum()) if all(c in df for c in ("API Loan Status", "API Rejected Loan")) else 0
+    print(f"PORTAL SYNC | Loan Status={_audit_status} | Rejected Loan={_audit_rejected} | Loan Request={_audit_requests} | overlap={_audit_overlap} | unique master loan IDs={_audit_master}", flush=True)
+    with st.expander("Portal sync — raw loan records (before dashboard filters)", expanded=False):
+        _a1, _a2, _a3, _a4 = st.columns(4)
+        _a1.metric("Loan Status rows", f"{_audit_status:,}")
+        _a2.metric("Rejected Loan rows", f"{_audit_rejected:,}")
+        _a3.metric("In both tabs", f"{_audit_overlap:,}")
+        _a4.metric("Unique loan IDs in master", f"{_audit_master:,}")
+        st.caption("The portal tabs may overlap. These are unfiltered master counts; the main KPIs may still apply reporting-date filters.")
+        _audit_cols = [c for c in ("Internal Loan ID", "LEAD ID", "Bank/NBFC", "Current Status", "Loan Sub Stage", "API Loan Status", "API Rejected Loan", "API Loan Request", "Extraction Source") if c in df.columns]
+        st.dataframe(df[_audit_cols], use_container_width=True, hide_index=True)
+        st.download_button("Download loan-level audit CSV", df[_audit_cols].to_csv(index=False).encode("utf-8-sig"), "rengy_loan_level_audit.csv", "text/csv", key="loan_audit_download")
+
+
 if df.empty:
     st.warning("No credit records were returned by the API.")
     st.stop()
@@ -4742,12 +4765,15 @@ if period_mode == "Month":
 else:
     kpi_cases = period_login_cases.copy()
 
-# One current case per valid Lead ID. Blank IDs are not collapsed together.
-if "LEAD ID" in kpi_cases.columns:
-    _ids = clean_series(kpi_cases["LEAD ID"])
-    _with_id = kpi_cases.loc[_ids.ne("")].drop_duplicates("LEAD ID", keep="first")
-    _without_id = kpi_cases.loc[_ids.eq("")]
-    kpi_cases = pd.concat([_with_id, _without_id], axis=0).sort_index()
+# PORTAL SYNC: Count loan APPLICATIONS, not unique lead codes.
+# A lead may have multiple legitimate lender applications. Never deduplicate
+# on LEAD ID for loan-level KPIs. The master has already deduplicated by
+# internal loan _id across overlapping API categories.
+if "Internal Loan ID" in kpi_cases.columns:
+    _loan_ids = clean_series(kpi_cases["Internal Loan ID"])
+    _valid = kpi_cases.loc[_loan_ids.ne("")].drop_duplicates("Internal Loan ID", keep="first")
+    _blank = kpi_cases.loc[_loan_ids.eq("")]
+    kpi_cases = pd.concat([_valid, _blank], axis=0).sort_index()
 
 _kpi_status = clean_series(kpi_cases["Current Status"]).str.casefold()
 

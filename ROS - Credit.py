@@ -710,6 +710,7 @@ ROS_SUB_STATUS = {
         5: "NACH Done",
         6: "Co-Applicant Docs Pending",
         7: "Not Doable",
+        8: "Pushed for Disbursal",
     },
     "Close Lost": {
         0: "Not Doable",
@@ -813,111 +814,92 @@ LOAN_EXTRACTION_WARNINGS = []
 
 
 def fetch_loan_population(source_name, filter_status):
-    """Raw-first API extraction. Never infer records from totalCount.
+    """Fetch page-indexed loan records with bounded parallelism and ID auditing.
 
-    Fetches small pages at sequential page numbers, preserves the exact API rows,
-    and logs every page's requested offset, returned length and new IDs.
-    A second pass checks for records that moved while the scan was running.
+    The portal confirms skip is a PAGE NUMBER, not a row offset.
+    Fetch page zero first to learn the server's effective page size.
     """
-    import time
-
-    print(f"\\nRAW EXTRACTION START | {source_name} | {filter_status}")
+    import math
     records_by_id = OrderedDict()
-    observed_counts = []
-    diagnostics = []
-    # Use the page size confirmed by the browser requests.
-    page_limit = 10
+    warnings = []
+    requested_limit = 50
 
-    for pass_no in (1, 2):
-        skip = 0
-        seen_signatures = set()
-        empty_pages = 0
-        for page_no in range(1, 1001):
-            params = {"filterStatus": filter_status, "limit": page_limit, "skip": skip}
-            payload = api_get(
-                LOAN_URL, params=params,
-                description=f"Raw {source_name} pass {pass_no} page {skip}",
-            )
-            if not isinstance(payload, dict) or payload.get("success") is False:
-                diagnostics.append(f"pass={pass_no} skip={skip}: invalid response")
-                break
-            total = payload.get("totalCount")
-            try:
-                if total is not None:
-                    observed_counts.append(int(total))
-            except (TypeError, ValueError):
-                diagnostics.append(f"pass={pass_no} skip={skip}: invalid totalCount")
-            batch = payload.get("data")
-            if not isinstance(batch, list):
-                diagnostics.append(f"pass={pass_no} skip={skip}: data is not a list")
-                break
-            new_ids = 0
-            ids = []
-            for record in batch:
-                if not isinstance(record, dict):
-                    continue
-                key = clean_text(record.get("_id"))
-                if not key:
-                    diagnostics.append(f"pass={pass_no} skip={skip}: row without _id")
-                    continue
-                ids.append(key)
-                if key not in records_by_id:
-                    row = dict(record)
-                    row["_reportSource"] = source_name
-                    records_by_id[key] = row
-                    new_ids += 1
-
-            print(
-                f"RAW PAGE | {source_name} | pass={pass_no} | "
-                f"skip={skip} | requested={page_limit} | "
-                f"returned={len(batch)} | new={new_ids} | "
-                f"unique={len(records_by_id)} | totalCount={total}"
-            )
-            if not batch:
-                empty_pages += 1
-                if empty_pages >= 2:
-                    break
-            else:
-                empty_pages = 0
-                signature = tuple(ids)
-                if signature in seen_signatures:
-                    diagnostics.append(
-                        f"pass={pass_no} skip={skip}: repeated page IDs; "
-                        "API may ignore skip"
-                    )
-                    break
-                seen_signatures.add(signature)
-
-            # The Rengy portal uses skip as a ZERO-BASED PAGE INDEX, not row offset.
-            # Browser verified: page 1 skip=0, page 2 skip=1, page 3 skip=2.
-            skip += 1
-
-            # A full last page may be followed by an empty page.
-            # If API returns a short page, check the next offset before stopping.
-            if len(batch) < page_limit:
-                empty_pages += 1
-                if empty_pages >= 2:
-                    break
-        else:
-            diagnostics.append(f"pass={pass_no}: safety page limit reached")
-        if pass_no == 1:
-            time.sleep(0.25)
-
-    observed = max(observed_counts) if observed_counts else None
-    count_label = str(observed) if observed is not None else "not supplied"
-    print(
-        f"RAW EXTRACTION RESULT | {source_name} | "
-        f"actual_unique={len(records_by_id)} | reported_total={count_label}"
-    )
-    if observed is not None and len(records_by_id) != observed:
-        diagnostics.append(
-            f"actual unique {len(records_by_id)} differs from API totalCount {observed}"
+    def read_page(page):
+        payload = api_get(
+            LOAN_URL,
+            params={"filterStatus": filter_status, "limit": requested_limit, "skip": page},
+            description=f"{source_name} page {page + 1}",
+            session=_get_worker_session(),
         )
-    if diagnostics:
-        warning = f"{source_name}: " + "; ".join(diagnostics[:6])
-        LOAN_EXTRACTION_WARNINGS.append(warning)
-        print("RAW EXTRACTION WARNING | " + warning)
+        if not isinstance(payload, dict) or payload.get("success") is False:
+            raise RuntimeError(f"{source_name} page {page}: invalid API response")
+        batch = payload.get("data")
+        if not isinstance(batch, list):
+            raise RuntimeError(f"{source_name} page {page}: missing data array")
+        return page, batch, payload.get("totalCount")
 
+    first_page, first_batch, first_total = read_page(0)
+    try:
+        expected = int(first_total) if first_total is not None else None
+    except (TypeError, ValueError):
+        expected = None
+    # Some APIs enforce a lower limit than requested. We must not assume
+    # 50 records were returned when the server only gave us 10.
+    effective_page_size = len(first_batch)
+    if not effective_page_size:
+        if expected:
+            raise RuntimeError(f"{source_name}: empty first page but totalCount={expected}")
+        return []
+
+    def add_batch(page, batch):
+        for item in batch:
+            if not isinstance(item, dict) or not item.get("_id"):
+                continue
+            key = str(item["_id"])
+            if key not in records_by_id:
+                row = dict(item)
+                row["_reportSource"] = source_name
+                records_by_id[key] = row
+        print(f"RAW PAGE | {source_name} | page={page} | returned={len(batch)} | "
+              f"unique={len(records_by_id)}", flush=True)
+
+    add_batch(0, first_batch)
+    if expected is not None:
+        page_count = math.ceil(expected / effective_page_size)
+        if page_count > 1000:
+            raise RuntimeError(f"{source_name}: unreasonable page count {page_count}")
+        pages = range(1, page_count)
+    else:
+        # Without totalCount we cannot precompute pages; scan sequentially.
+        pages = None
+
+    if pages is not None:
+        # Moderate concurrency speeds up loading without flooding the API.
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            for page, batch, reported in pool.map(read_page, pages):
+                add_batch(page, batch)
+                if reported is not None and expected is not None:
+                    try:
+                        if int(reported) != expected:
+                            warnings.append("API totalCount changed during extraction")
+                    except (TypeError, ValueError):
+                        pass
+    else:
+        for page in range(1, 1000):
+            _, batch, _ = read_page(page)
+            if not batch:
+                break
+            add_batch(page, batch)
+            if len(batch) < effective_page_size:
+                break
+
+    actual = len(records_by_id)
+    print(f"RAW EXTRACTION RESULT | {source_name} | actual_unique={actual} | "
+          f"reported_total={expected} | page_size={effective_page_size}", flush=True)
+    if expected is not None and actual != expected:
+        warnings.append(f"actual unique {actual} differs from API totalCount {expected}")
+    if warnings:
+        LOAN_EXTRACTION_WARNINGS.append(f"{source_name}: " + "; ".join(dict.fromkeys(warnings)))
     return list(records_by_id.values())
 
 
@@ -929,17 +911,14 @@ def fetch_all_loan_records():
 
     all_rows = []
 
-    for (
-        source_name,
-        filter_status
-    ) in LOAN_POPULATIONS.items():
-
-        rows = fetch_loan_population(
-            source_name,
-            filter_status
-        )
-
-        all_rows.extend(rows)
+    # Three independent loan categories can be fetched simultaneously.
+    with ThreadPoolExecutor(max_workers=3) as loan_pool:
+        futures = {
+            name: loan_pool.submit(fetch_loan_population, name, status)
+            for name, status in LOAN_POPULATIONS.items()
+        }
+        for name in LOAN_POPULATIONS:
+            all_rows.extend(futures[name].result())
 
     # ------------------------------------------
     # Deduplicate using INTERNAL loan _id.
@@ -3524,8 +3503,8 @@ def fetch_many_details(
         if still_failed:
             st.warning(
                 f"{len(still_failed):,} API detail records could not be "
-                "loaded after retry/recovery. They are excluded rather "
-                "than being assigned incorrect dates or outcomes."
+                "loaded after retry/recovery. Listing-response fallback "
+                "will be used where possible; detail-only fields may be unavailable."
             )
 
     progress.empty()
